@@ -1,0 +1,63 @@
+{
+  "unlocks": {
+    "raidRunThrough": true,
+    "raidDeath": false,
+    "inventory": true,
+    "quests": true,
+    "foundInRaidOnly": false
+  },
+  "hideItems": true,
+  "allTraders": false,
+  "traders": [
+    "54cb50c76803fa8b248b4571",
+    "54cb57776803fa99248b456e",
+    "579dc571d53a0658a154fbec",
+    "58330581ace78e27b8b10cee",
+    "5935c25fb3acc3127c3d8cd9",
+    "5a7c2eca46aef81a7ca2145d",
+    "5ac3b934156ae10c4430e83c",
+    "5c0647fdd443bc2504c2d371",
+    "6617beeaa9cfa777ca915b7c",
+    "66bf757f27d0b097db0acea5"
+  ],
+  "includeRagfair": true,
+  "ignoreCategories": {
+    "keys": true,
+    "specialEquipment": true,
+    "secureContainers": true,
+    "maps": true,
+    "money": true,
+    "foodAndDrink": false,
+    "barterItems": false,
+    "meleeWeapons": false,
+    "throwables": false,
+    "infoItems": false,
+    "meds": false,
+    "backpacks": false,
+    "rigs": false,
+    "weaponParts": false,
+    "guns": false,
+    "armourHelmet": false,
+    "headphones": false,
+    "armBands": false,
+    "ammo": false,
+    "ammoBoxes": false,
+    "containers": true
+  },
+  "ignoreItems": [
+    "5991b51486f77447b112d44f",
+    "591094e086f7747caa7bb2ef",
+    "5f4f9eb969cdc30ff33f09db",
+    "5910959486f7747d96753485",
+    "544fb5454bdc2df8738b456a",
+    "5ac78a9b86f7741cca0bbd8d",
+    "5b4391a586f7745321235ab2",
+    "5910968f86f77425cf569c32"
+  ],
+  "requireUnlockComponents": true,
+  "debug": false,
+  "wishlisttype": 4,
+  "gunsmith": 3,
+  "gunsmithcount": 25
+}
+
