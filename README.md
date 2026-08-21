@@ -1,100 +1,124 @@
 # Bronzemanmode for SPT 4.1.3
 
-> **Status:** personal development version of Bronzemanmode for SPT 4.1.3.
-
-This repository is a continuation of **Bronzemanmode**, currently maintained and developed primarily for my own SPT setup.
-
-The project is public so other users can inspect the source, follow development, test it, or use the builds if they find them useful. However, this is first and foremost a personal project rather than an official release for The Forge / SP-Mod.
-
-## Important: LLM-assisted development
-
-This project is developed with **substantial LLM/AI assistance, primarily ChatGPT**.
-
-I define the desired behaviour, features, requirements and testing direction. ChatGPT is used to analyse the existing codebase and SPT APIs, suggest implementation approaches, and write a significant part of the implementation. I then compile the mod, test it in a live SPT installation, reproduce issues, provide logs and feedback, choose between implementation approaches, and validate the resulting behaviour.
-
-Because substantial parts of the new compatibility work and features are written with LLM assistance, this project **does not meet The Forge / SP-Mod AI-generated content policy and will not be submitted there** under the current development workflow.
-
-The relevant policy can be found here:
-
-https://sp-mod.com/content-guidelines#ai-generated-content-policy
-
-This disclosure is intentionally kept public so there is no ambiguity about how the project is developed.
-
-## Project history
-
-Bronzemanmode was originally created by **KcY / KeiranY**.
-
-Original project:
-https://github.com/KeiranY/tarkov-bronzeman
-
-The mod was later ported and maintained for newer SPT versions by **Randek003**.
-
-Randek003's repository:
-https://github.com/Randek003/Bronzemanmode
-
-SP-Mod / The Forge page for Randek003's port:
-https://sp-mod.com/mod/1623/bronzemanmode-by-kcy-39-port
-
-The SPT 4.1+ development work in this repository is maintained by **PainRUS** with permission from Randek003.
-
-Current repository:
-https://github.com/PainRUS/Bronzemanmode-SPT-4.1.3-Fix
-
-## What Bronzemanmode does
-
-Bronzemanmode changes progression so items generally need to be earned before they can be freely purchased from traders or the flea market.
-
-Depending on configuration, items can be unlocked through raids, inventory ownership, quest rewards and other supported sources. The goal is to keep the original Bronzeman progression idea while improving compatibility and quality of life for newer SPT versions.
-
-## SPT 4.1.3 work
-
-Current compatibility work includes:
-
-- updated raid-end handling for the SPT 4.1.x local raid flow;
-- wishlist handling updated for the current SPT profile model;
-- corrected trader filtering;
-- updated quest reward handling for current SPT APIs;
-- separated physical-item FIR checks from template-based unlocks;
-- Gunsmith quest-ID fallback for the Part 1 data mismatch;
-- persistent Bronzeman unlock state in the player profile;
-- mail attachment unlock support;
-- assembled weapons received through mail can unlock the weapon and attached components;
-- immediate client-side wishlist synchronization through the BepInEx companion plugin;
-- linked-search compatibility for the native flea routes and UI Fixes slot searches;
-- locked templates are removed from the flea category tree instead of appearing as empty categories;
-- a second-layer purchase guard blocks locked direct-trader, Fence and flea purchases before SPT mutates inventory, money or offer stock;
-- blocked purchases use a non-modal localized notification instead of the EFT critical-error dialog;
-- `debugShowLockedItems` can expose locked trader/flea entries for purchase-guard testing without disabling the guard itself.
-
-## Version
+> **Bronzeman Mode was originally created by KcY / KeiranY.** This repository continues that original mod for SPT 4.1.3, based on the later port and maintenance work by Randek003.
 
 Current release: **2.0.1**  
 Target: **SPT 4.1.3**
 
-## Validation
+## Description
 
-The current build has been manually compiled and tested on SPT 4.1.3 with an existing profile and a multi-mod setup.
+Bronzeman Mode is a challenge/progression mode inspired by Gudi's OSRS Bronzeman concept. The core rule is simple: **you must earn or unlock an item before you can freely purchase it from affected traders or the flea market.**
 
-Validated scenarios include:
+With the default configuration, locked items are hidden from the affected trader assortments and flea-market results. Once an item is unlocked through one of the enabled sources, it becomes available for normal purchase from the configured traders and/or flea market.
 
-- server mod loading successfully;
-- existing Bronzeman unlock data surviving profile reloads;
-- wishlist initialization;
-- successful raid unlocks;
-- attached weapon component unlocks;
-- raid-death configuration behaviour;
-- inventory unlock configuration behaviour;
-- immediate mail attachment unlocks;
-- assembled weapon mail rewards;
-- flea/trader availability after mail unlocks;
-- client wishlist synchronization after closing the mail transfer screen;
-- UI Fixes linked-search filtering;
-- locked flea categories disappearing from the left-side flea tree;
-- blocked purchases at configured traders, Fence, normal flea offers, trader-owned flea offers and linked-search results;
-- blocked purchases do not add items, spend money, reduce trader/Fence stock or consume the target flea offer;
-- blocked purchases show the Bronzeman non-modal notification without the EFT critical-error dialog.
+Items can currently be unlocked through:
 
-Not every configuration or third-party mod combination has been tested.
+- successful raid extracts;
+- Run Through raids, when enabled;
+- items already owned in the PMC inventory, when enabled;
+- items received from in-game mail, including received item trees/attachments;
+- quest rewards, when enabled.
+
+The mod can also be configured to unlock items after death/MIA, require Found in Raid status for physical item unlocks, exclude whole item categories from Bronzeman restrictions, or permanently allow specific item templates.
+
+Locked purchases are protected by a second purchase check. This means a locked item cannot be bought simply because it becomes visible through another search route or UI interaction. When such a purchase is blocked, the client companion shows a non-modal Bronzeman notification instead of allowing the transaction.
+
+Bronzeman also integrates with the EFT wishlist. Locked items can be managed through Bronzeman-specific wishlist values, and Gunsmith-related items can use a separate wishlist marker.
+
+### Original project and ports
+
+Original Bronzeman Mode by **KcY / KeiranY**:
+
+- https://github.com/KeiranY/tarkov-bronzeman
+- https://sp-mod.com/mod/192/bronzeman-mode
+
+Later SPT port and maintenance by **Randek003**:
+
+- https://github.com/Randek003/Bronzemanmode
+- https://sp-mod.com/mod/1623/bronzemanmode-by-kcy-39-port
+
+The SPT 4.1+ continuation in this repository is maintained by **PainRUS** with permission from Randek003.
+
+## Installation
+
+Download the release archive and extract its contents directly into the **root folder of your SPT installation**.
+
+The installed files should end up in these locations:
+
+```text
+SPT_Runtime\user\mods\Bronzeman\Bronzeman.dll
+SPT_Runtime\user\mods\Bronzeman\config.json
+SPT_Runtime\user\mods\Bronzeman\gunsmith.json
+
+BepInEx\plugins\Bronzeman\Bronzeman.Client.dll
+```
+
+Restart both the SPT server and EFT after installation.
+
+If you are updating an existing installation and have customized `config.json`, back it up before replacing files from the release archive.
+
+## Configuration
+
+Configuration is stored in:
+
+```text
+SPT_Runtime\user\mods\Bronzeman\config.json
+```
+
+### Unlock sources
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `unlocks.raidRunThrough` | `true` | Allows items to be unlocked after a Run Through. If `foundInRaidOnly` is enabled, the FIR requirement still applies. |
+| `unlocks.raidDeath` | `false` | Allows raid-carried items to unlock after death/MIA. |
+| `unlocks.inventory` | `true` | Unlocks items already present in the PMC inventory/stash when the profile is processed. |
+| `unlocks.mail` | `true` | Unlocks items received from in-game mail. Received item trees and attachments are processed together. |
+| `unlocks.quests` | `true` | Unlocks item templates received as quest rewards. |
+| `unlocks.foundInRaidOnly` | `false` | Requires physical raid/inventory items to have Found in Raid status before they unlock. Quest/mail template unlocks are handled independently. |
+
+### Trader and flea restrictions
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `hideItems` | `true` | Removes locked items from affected trader assortments. If `false`, locked trader items remain visible with stock set to `0`. |
+| `allTraders` | `false` | Applies Bronzeman restrictions to every trader, including compatible modded traders. If `false`, only IDs listed in `traders` are affected. |
+| `traders` | configured list | Trader IDs affected when `allTraders` is `false`. |
+| `includeRagfair` | `true` | Applies Bronzeman restrictions to the flea market/ragfair. |
+| `requireUnlockComponents` | `true` | Requires the root item and its included/attached item components to be unlocked before the complete offer can be purchased. |
+
+### Always-available items
+
+`ignoreCategories` controls categories that are always purchasable without being individually unlocked.
+
+The default configuration ignores these categories:
+
+- keys;
+- special equipment;
+- secure containers;
+- maps;
+- money;
+- containers.
+
+Other category switches are present in `config.json` and can be enabled individually.
+
+`ignoreItems` is a list of individual template IDs that are always allowed. This is useful for items that should remain available regardless of Bronzeman progression.
+
+### Wishlist and Gunsmith
+
+These are advanced settings and normally do not need to be changed:
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `wishlisttype` | `4` | Wishlist marker value used by Bronzeman for normal locked items. |
+| `gunsmith` | `3` | Separate wishlist marker value used for Gunsmith-related items. |
+| `gunsmithcount` | `25` | Maximum number of configured Gunsmith quests considered by the Gunsmith wishlist helper. |
+
+### Debug options
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `debug` | `false` | Enables additional Bronzeman diagnostic logging. |
+| `debugShowLockedItems` | `false` | Shows locked trader/flea entries for testing while keeping the purchase guard active. Do not enable for normal gameplay unless you specifically want this debug behaviour. |
 
 ## Build
 
@@ -124,33 +148,13 @@ Expected output:
 Bronzeman.Client\bin\Release\netstandard2.1\Bronzeman.Client.dll
 ```
 
-## Installation
+## Important: LLM-assisted development
 
-### Server
+This SPT 4.1+ continuation is developed with **substantial LLM/AI assistance, primarily ChatGPT**.
 
-Replace the Bronzeman server DLL in the installed server-mod directory with:
+I define the desired behaviour, features, requirements and testing direction. ChatGPT is used to analyse the existing codebase and SPT APIs, suggest implementation approaches, and write a significant part of the implementation. I then compile the mod, test it in a live SPT installation, reproduce issues, provide logs and feedback, choose between implementation approaches, and validate the resulting behaviour.
 
-```text
-Bronzeman.dll
-```
-
-Keep the existing configuration files unless intentionally changing settings.
-
-### Client
-
-Place:
-
-```text
-Bronzeman.Client.dll
-```
-
-under a BepInEx plugins directory, for example:
-
-```text
-SPT\BepInEx\plugins\Bronzeman\Bronzeman.Client.dll
-```
-
-Then restart the SPT server and EFT client.
+Because substantial parts of the continuation are written with LLM assistance, this project is currently maintained on GitHub rather than being submitted to The Forge / SP-Mod under the current development workflow.
 
 ## License
 
@@ -160,7 +164,7 @@ See [LICENSE](LICENSE).
 
 ## Credits
 
-- **KcY / KeiranY** — original creator of Bronzeman Mode.
-- **Randek003** — porting and maintenance of Bronzemanmode for later SPT versions before the SPT 4.1+ continuation.
-- **PainRUS** — SPT 4.1+ project direction, testing, integration, maintenance and validation.
-- **ChatGPT / LLM tooling** — substantial assistance with code analysis and implementation for this development branch.
+- **KcY / KeiranY** — original developer and creator of Bronzeman Mode for SPT.
+- **Randek003** — porting and maintenance of Bronzemanmode for later SPT versions before this continuation.
+- **PainRUS** — SPT 4.1+ project direction, testing, integration and maintenance.
+- **ChatGPT / LLM tooling** — substantial assistance with code analysis and implementation for the SPT 4.1+ continuation.
