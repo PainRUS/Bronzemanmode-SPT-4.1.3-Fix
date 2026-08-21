@@ -20,12 +20,10 @@ public sealed class BronzemanLocaleState
         locales[sessionId.ToString()] = localeId.Trim();
     }
 
-    public string GetPurchaseBlockedMessage(MongoId sessionId)
+    public bool IsRussian(MongoId sessionId)
     {
         return locales.TryGetValue(sessionId.ToString(), out var localeId)
-               && localeId.StartsWith("ru", StringComparison.OrdinalIgnoreCase)
-            ? "Bronzemanmode:Товар не доступен к покупке"
-            : "Bronzemanmode:Item is not available for purchase";
+               && localeId.StartsWith("ru", StringComparison.OrdinalIgnoreCase);
     }
 }
 
