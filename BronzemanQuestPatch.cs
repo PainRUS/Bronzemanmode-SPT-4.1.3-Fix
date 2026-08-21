@@ -3,6 +3,11 @@ using SPTarkov.Common.Models.Logging;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Reflection.Patching;
 using SPTarkov.Server.Core.Controllers;
+using SPTarkov.Server.Core.Models.Common;
+using SPTarkov.Server.Core.Models.Eft.Common;
+using SPTarkov.Server.Core.Models.Eft.Common.Tables;
+using SPTarkov.Server.Core.Models.Eft.Quests;
+using SPTarkov.Server.Core.Models.Enums;
 using SPTarkov.Server.Core.Models.Spt.Tables;
 
 namespace Bronzeman;
@@ -27,7 +32,6 @@ public sealed class BronzemanQuestPatch : AbstractPatch
         _config = config;
     }
 
-
     private static void LogInfo(string message)
     {
         if (_config.Debug)
@@ -46,147 +50,73 @@ public sealed class BronzemanQuestPatch : AbstractPatch
             _logger.Error(message);
     }
 
-    private static void LogSuccess(string message)
-    {
-        if (_config.Debug)
-            _logger.Success(message);
-    }
-
     protected override MethodBase GetTargetMethod()
     {
-        return typeof(QuestController)
-            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
-            .Single(x =>
-                x.Name == nameof(QuestController.CompleteQuest) &&
-                x.GetParameters().Length == 3);
+        return typeof(QuestController).GetMethod(
+                   nameof(QuestController.CompleteQuest),
+                   BindingFlags.Instance | BindingFlags.Public,
+                   binder: null,
+                   types:
+                   [
+                       typeof(PmcData),
+                       typeof(CompleteQuestRequestData),
+                       typeof(MongoId)
+                   ],
+                   modifiers: null)
+               ?? throw new MissingMethodException(
+                   typeof(QuestController).FullName,
+                   nameof(QuestController.CompleteQuest));
     }
 
     [PatchPostfix]
-    public static void Postfix(object __1, object __2)
+    public static void Postfix(CompleteQuestRequestData __1, MongoId __2)
     {
         if (!_config.Unlocks.Quests)
             return;
 
         try
         {
-            dynamic request = __1;
-            var questId = request.QuestId.ToString();
-            var sessionId = __2?.ToString() ?? string.Empty;
+            var profile = _bronzemanMod.GetPlayer(__2);
+            var pmc = profile.CharacterData?.PmcData;
 
-            if (string.IsNullOrEmpty(sessionId))
+            if (pmc is null)
             {
-                LogError("[bronzeman] Quest reward unlock failed: session id was empty.");
+                LogError("[bronzeman] Quest reward unlock failed: PMC profile is null.");
                 return;
             }
 
-            var profile = _bronzemanMod.GetPlayer(sessionId);
-
-            dynamic? profileQuest = null;
-            dynamic pmc = profile.CharacterData.PmcData;
-
-            foreach (dynamic q in pmc.Quests)
-            {
-                if (q.QId.ToString() == questId)
-                {
-                    profileQuest = q;
-                    break;
-                }
-            }
+            var profileQuest = pmc.Quests?.FirstOrDefault(quest => quest.QId == __1.QuestId);
 
             // Only unlock rewards after SPT actually marked the quest as Success.
-            if (profileQuest is null || Convert.ToInt32(profileQuest.Status) != 4)
+            if (profileQuest?.Status != QuestStatusEnum.Success)
                 return;
 
-            var quest = TemplateTableLookup(questId);
-
-            if (quest is null)
-                return;
-
-            var rewardTemplates = new HashSet<string>(
-                StringComparer.OrdinalIgnoreCase);
-
-            var rewards = quest.Rewards as System.Collections.IDictionary;
-
-            if (rewards is null || !rewards.Contains("Success"))
-                return;
-
-            var successRewards = rewards["Success"] as System.Collections.IEnumerable;
-
-            if (successRewards is null)
-                return;
-
-            foreach (dynamic reward in successRewards)
+            if (!_templateTable.Quests.TryGetValue(__1.QuestId, out var quest)
+                || quest.Rewards is null
+                || !quest.Rewards.TryGetValue(QuestStatusEnum.Success.ToString(), out var rewards))
             {
-                var type = GetPropertyString(reward, "Type");
+                LogWarning(
+                    $"[bronzeman] Quest '{__1.QuestId}' completed but no static Success rewards were found.");
+                return;
+            }
 
-                if (string.Equals(type, "Item", StringComparison.OrdinalIgnoreCase))
-                {
-                    // A normal item reward can contain multiple actual reward items.
-                    // These are the items the player receives (often through mail).
-                    var rewardItems = GetPropertyEnumerable(reward, "Items");
+            var gameVersion = pmc.Info?.GameVersion;
+            var rewardTemplates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                    if (rewardItems is null)
-                        continue;
-
-                    foreach (var rewardItem in rewardItems)
-                    {
-                        var tpl = GetTemplateId(rewardItem);
-
-                        if (!string.IsNullOrEmpty(tpl))
-                            rewardTemplates.Add(tpl);
-                    }
-
+            foreach (var reward in rewards)
+            {
+                if (!RewardAppliesToGameEdition(reward, gameVersion))
                     continue;
-                }
 
-                if (string.Equals(type, "AssortmentUnlock", StringComparison.OrdinalIgnoreCase))
+                switch (reward.Type)
                 {
-                    // AssortmentUnlock is NOT a normal item reward.
-                    // `Target` is the _id of the specific item inside reward.Items
-                    // whose _tpl is the trader template unlocked by this quest.
-                    var targetId = GetPropertyString(reward, "Target");
-                    var rewardItems = GetPropertyEnumerable(reward, "Items");
-
-                    if (string.IsNullOrEmpty(targetId) || rewardItems is null)
-                    {
-                        LogWarning(
-                            $"[bronzeman] Quest '{questId}' has an AssortmentUnlock reward without a readable Target/Items.");
-                        continue;
-                    }
-
-                    string? unlockedTpl = null;
-
-                    foreach (var rewardItem in rewardItems)
-                    {
-                        var rewardItemId = GetPropertyString(rewardItem, "Id")
-                                           ?? GetPropertyString(rewardItem, "_id");
-
-                        if (!string.Equals(
-                                rewardItemId,
-                                targetId,
-                                StringComparison.OrdinalIgnoreCase))
-                        {
-                            continue;
-                        }
-
-                        unlockedTpl = GetTemplateId(rewardItem);
+                    case RewardType.Item:
+                        AddItemRewardTemplates(reward, rewardTemplates);
                         break;
-                    }
 
-                    if (string.IsNullOrEmpty(unlockedTpl))
-                    {
-                        LogWarning(
-                            $"[bronzeman] Quest '{questId}' AssortmentUnlock target '{targetId}' had no matching template.");
-                        continue;
-                    }
-
-                    rewardTemplates.Add(unlockedTpl);
-
-                    if (_config.Debug)
-                    {
-                        LogInfo(
-                            $"[bronzeman] Quest assortment unlock: target ({targetId}) -> tpl ({unlockedTpl}).");
-                    }
+                    case RewardType.AssortmentUnlock:
+                        AddAssortmentUnlockTemplate(__1.QuestId, reward, rewardTemplates);
+                        break;
                 }
             }
 
@@ -194,8 +124,10 @@ public sealed class BronzemanQuestPatch : AbstractPatch
                 return;
 
             LogInfo(
-                $"[bronzeman] Unlocking {rewardTemplates.Count} unique item templates from quest '{questId}'.");
+                $"[bronzeman] Unlocking {rewardTemplates.Count} unique item templates from quest '{__1.QuestId}'.");
 
+            // Template unlocks intentionally bypass foundInRaidOnly. They are
+            // granted by quest completion, not obtained as physical raid loot.
             _bronzemanMod.UnlockItemTemplates(profile, rewardTemplates);
         }
         catch (Exception ex)
@@ -204,73 +136,73 @@ public sealed class BronzemanQuestPatch : AbstractPatch
         }
     }
 
-    private static dynamic? TemplateTableLookup(string questId)
+    private static bool RewardAppliesToGameEdition(Reward reward, string? gameVersion)
     {
-        foreach (var pair in _templateTable.Quests)
+        if (string.IsNullOrEmpty(gameVersion))
+            return true;
+
+        if (reward.AvailableInGameEditions?.Count > 0
+            && !reward.AvailableInGameEditions.Contains(gameVersion))
         {
-            if (pair.Key.ToString() == questId)
-                return pair.Value;
+            return false;
         }
 
-        return null;
+        if (reward.NotAvailableInGameEditions?.Count > 0
+            && reward.NotAvailableInGameEditions.Contains(gameVersion))
+        {
+            return false;
+        }
+
+        return true;
     }
 
-    private static string? GetPropertyString(object? value, string propertyName)
+    private static void AddItemRewardTemplates(
+        Reward reward,
+        HashSet<string> rewardTemplates)
     {
-        if (value is null)
-            return null;
+        if (reward.Items is null)
+            return;
 
-        try
+        foreach (var rewardItem in reward.Items)
         {
-            var property = value.GetType().GetProperties()
-                .FirstOrDefault(p =>
-                    string.Equals(
-                        p.Name,
-                        propertyName,
-                        StringComparison.OrdinalIgnoreCase));
-
-            return property?.GetValue(value)?.ToString();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static System.Collections.IEnumerable? GetPropertyEnumerable(
-        object? value,
-        string propertyName)
-    {
-        if (value is null)
-            return null;
-
-        try
-        {
-            var property = value.GetType().GetProperties()
-                .FirstOrDefault(p =>
-                    string.Equals(
-                        p.Name,
-                        propertyName,
-                        StringComparison.OrdinalIgnoreCase));
-
-            return property?.GetValue(value) as System.Collections.IEnumerable;
-        }
-        catch
-        {
-            return null;
+            var templateId = rewardItem.Template.ToString();
+            if (!string.IsNullOrEmpty(templateId))
+                rewardTemplates.Add(templateId);
         }
     }
 
-    private static string? GetTemplateId(object? item)
+    private static void AddAssortmentUnlockTemplate(
+        MongoId questId,
+        Reward reward,
+        HashSet<string> rewardTemplates)
     {
-        if (item is null)
-            return null;
+        if (reward.Items is null || string.IsNullOrEmpty(reward.Target))
+        {
+            LogWarning(
+                $"[bronzeman] Quest '{questId}' has an AssortmentUnlock reward without readable Target/Items.");
+            return;
+        }
 
-        if (item is string s)
-            return s;
+        var targetItem = reward.Items.FirstOrDefault(item =>
+            string.Equals(
+                item.Id.ToString(),
+                reward.Target,
+                StringComparison.OrdinalIgnoreCase));
 
-        return GetPropertyString(item, "Template")
-               ?? GetPropertyString(item, "_tpl")
-               ?? GetPropertyString(item, "Tpl");
+        if (targetItem is null)
+        {
+            LogWarning(
+                $"[bronzeman] Quest '{questId}' AssortmentUnlock target '{reward.Target}' had no matching reward item.");
+            return;
+        }
+
+        var templateId = targetItem.Template.ToString();
+        if (string.IsNullOrEmpty(templateId))
+            return;
+
+        rewardTemplates.Add(templateId);
+
+        LogInfo(
+            $"[bronzeman] Quest assortment unlock: target ({reward.Target}) -> tpl ({templateId}).");
     }
 }
