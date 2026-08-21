@@ -57,8 +57,8 @@
   ],
   "requireUnlockComponents": true,
   "debug": false,
+  "debugShowLockedItems": false,
   "wishlisttype": 4,
   "gunsmith": 3,
   "gunsmithcount": 25
 }
-
