@@ -7,14 +7,32 @@ using SPTarkov.Server.Core.Utils;
 
 namespace Bronzeman;
 
-// Ragfair filtering must run after SPT has produced /client/ragfair/find.
-[Injectable(TypePriority = OnLoadOrder.Routers + 1)]
+// Ragfair filtering must run after the route that produced the search response.
+// SPT 4.1.x exposes both /client/ragfair/find and /client/ragfair/search.
+// UI Fixes 6.x also exposes /uifixes/ragfair/find for slot-specific linked searches.
+// UI Fixes registers its router at OnLoadOrder.Routers + 1, so Bronzeman uses +2
+// to guarantee that its post-filter receives the completed UI Fixes flea response.
+[Injectable(TypePriority = OnLoadOrder.Routers + 2)]
 public sealed class BronzemanRagfairRouter(
     JsonUtil jsonUtil,
     BronzemanRagfairRouterCallback callback)
     : StaticRouter(jsonUtil, [
         new RouteAction<EmptyRequestData>(
             "/client/ragfair/find",
+            async (url, info, sessionId, output, cancellationToken) =>
+                await callback.Handle(
+                    url,
+                    sessionId,
+                    output ?? string.Empty)),
+        new RouteAction<EmptyRequestData>(
+            "/client/ragfair/search",
+            async (url, info, sessionId, output, cancellationToken) =>
+                await callback.Handle(
+                    url,
+                    sessionId,
+                    output ?? string.Empty)),
+        new RouteAction<EmptyRequestData>(
+            "/uifixes/ragfair/find",
             async (url, info, sessionId, output, cancellationToken) =>
                 await callback.Handle(
                     url,
@@ -36,6 +54,17 @@ public sealed class BronzemanRagfairRouterCallback(
     {
         if (!config.IncludeRagfair)
             return new ValueTask<string>(output);
+
+        if (config.DebugShowLockedItems)
+        {
+            if (config.Debug)
+            {
+                Console.WriteLine(
+                    $"[bronzeman] debugShowLockedItems=true; flea display filtering bypassed for URL={url}. Purchase guard remains active.");
+            }
+
+            return new ValueTask<string>(output);
+        }
 
         if (config.Debug)
         {
@@ -60,10 +89,43 @@ public sealed class BronzemanRagfairRouterCallback(
         }
 
         var data = root?["data"] as JsonObject;
-        if (data is null || data["offers"] is not JsonArray offers)
+        if (data is null)
             return new ValueTask<string>(output);
 
         var profile = bronzemanMod.GetPlayer(sessionId);
+
+        // SPT returns the flea browser's left-side item tree as a dictionary
+        // of template id -> offer count in data.categories. Remove locked root
+        // templates here so unopened items do not appear as selectable entries
+        // that only lead to an empty offer page.
+        if (data["categories"] is JsonObject categories)
+        {
+            var originalCategoryCount = categories.Count;
+            var categoryKeys = categories
+                .Select(category => category.Key)
+                .ToList();
+
+            foreach (var templateId in categoryKeys)
+            {
+                if (!string.IsNullOrEmpty(templateId)
+                    && bronzemanMod.CanPurchase(profile, templateId))
+                {
+                    continue;
+                }
+
+                categories.Remove(templateId);
+            }
+
+            if (config.Debug)
+            {
+                Console.WriteLine(
+                    $"[bronzeman] Returning {categories.Count}/{originalCategoryCount} flea category entries using Bronzeman filter");
+            }
+        }
+
+        if (data["offers"] is not JsonArray offers)
+            return new ValueTask<string>(root?.ToJsonString() ?? output);
+
         var originalCount = offers.Count;
 
         for (var index = offers.Count - 1; index >= 0; index--)
