@@ -25,5 +25,15 @@ public sealed class Plugin : BaseUnityPlugin
         {
             Logger.LogError($"Bronzeman client failed to apply wishlist sync patch: {exception}");
         }
+
+        try
+        {
+            new PurchaseBlockedNotificationPatch().Enable();
+            Logger.LogInfo("Bronzeman blocked-purchase toast notification enabled.");
+        }
+        catch (System.Exception exception)
+        {
+            Logger.LogError($"Bronzeman client failed to apply blocked-purchase notification patch: {exception}");
+        }
     }
 }
