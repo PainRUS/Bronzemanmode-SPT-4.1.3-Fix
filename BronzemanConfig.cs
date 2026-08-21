@@ -31,6 +31,9 @@ public sealed class BronzemanConfig
     [JsonPropertyName("debug")]
     public bool Debug { get; set; }
 
+    [JsonPropertyName("debugShowLockedItems")]
+    public bool DebugShowLockedItems { get; set; }
+
     [JsonPropertyName("wishlisttype")]
     public int WishlistType { get; set; } = 4;
 
