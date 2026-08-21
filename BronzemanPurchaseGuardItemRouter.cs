@@ -15,6 +15,7 @@ using SPTarkov.Server.Core.Models.Eft.Ws;
 using SPTarkov.Server.Core.Models.Enums;
 using SPTarkov.Server.Core.Servers.Ws;
 using SPTarkov.Server.Core.Services.Ragfair;
+using SPTarkov.Server.Core.Utils;
 
 namespace Bronzeman;
 
@@ -28,6 +29,7 @@ public sealed class BronzemanPurchaseGuardItemRouter(
     TraderAssortHelper traderAssortHelper,
     RagfairOfferService ragfairOfferService,
     SptWebSocketConnectionHandler webSocketConnectionHandler,
+    HttpResponseUtil httpResponseUtil,
     BronzemanMod bronzemanMod,
     BronzemanConfig config,
     BronzemanLocaleState localeState,
@@ -40,6 +42,7 @@ public sealed class BronzemanPurchaseGuardItemRouter(
                     tradeCallbacks,
                     traderAssortHelper,
                     webSocketConnectionHandler,
+                    httpResponseUtil,
                     bronzemanMod,
                     config,
                     localeState,
@@ -55,6 +58,7 @@ public sealed class BronzemanPurchaseGuardItemRouter(
                     tradeCallbacks,
                     ragfairOfferService,
                     webSocketConnectionHandler,
+                    httpResponseUtil,
                     bronzemanMod,
                     config,
                     localeState,
@@ -68,10 +72,18 @@ public sealed class BronzemanPurchaseGuardItemRouter(
     private static readonly MongoId RussianBlockedNotificationId = new("b10c0ed00000000000000001");
     private static readonly MongoId EnglishBlockedNotificationId = new("b10c0ed00000000000000002");
 
+    // EFT treats IncorrectClientPrice (1519) as a failed inventory operation, so
+    // trader/flea UIs do not execute their successful-purchase paths. Its native
+    // InventoryWarning.TryGetMessage intentionally returns false, so it does not
+    // open the normal inventory-error UI. The visible denial is delivered through
+    // the separate Bronzeman websocket toast instead.
+    private const string BlockedPurchaseFailureMarker = "BRONZEMAN_PURCHASE_BLOCKED";
+
     private static async ValueTask<ItemEventRouterResponse> HandleTraderTrade(
         TradeCallbacks tradeCallbacks,
         TraderAssortHelper traderAssortHelper,
         SptWebSocketConnectionHandler webSocketConnectionHandler,
+        HttpResponseUtil httpResponseUtil,
         BronzemanMod bronzemanMod,
         BronzemanConfig config,
         BronzemanLocaleState localeState,
@@ -114,17 +126,14 @@ public sealed class BronzemanPurchaseGuardItemRouter(
             logger,
             config.Debug);
 
-        // Deliberately return the untouched ItemEvent response. A warning/error
-        // makes EFT show a critical modal and can eject the player to the main
-        // menu. The purchase itself has already been rejected because native SPT
-        // trade processing is never entered.
-        return output;
+        return CreateBlockedPurchaseFailure(httpResponseUtil, output);
     }
 
     private static async ValueTask<ItemEventRouterResponse> HandleRagfairTrade(
         TradeCallbacks tradeCallbacks,
         RagfairOfferService ragfairOfferService,
         SptWebSocketConnectionHandler webSocketConnectionHandler,
+        HttpResponseUtil httpResponseUtil,
         BronzemanMod bronzemanMod,
         BronzemanConfig config,
         BronzemanLocaleState localeState,
@@ -174,10 +183,25 @@ public sealed class BronzemanPurchaseGuardItemRouter(
                 logger,
                 config.Debug);
 
-            return output;
+            return CreateBlockedPurchaseFailure(httpResponseUtil, output);
         }
 
         return await tradeCallbacks.ProcessRagfairTrade(pmcData, request, sessionId);
+    }
+
+    private static ItemEventRouterResponse CreateBlockedPurchaseFailure(
+        HttpResponseUtil httpResponseUtil,
+        ItemEventRouterResponse output)
+    {
+        // Do not return an empty successful response. EFT uses result.Succeed to
+        // show the native "item purchased" notification and to apply successful
+        // flea-purchase UI behavior even when the server intentionally performed
+        // no transaction. Code 1519 produces a failed callback result while its
+        // native warning presentation is deliberately silent.
+        return httpResponseUtil.AppendErrorToOutput(
+            output,
+            BlockedPurchaseFailureMarker,
+            BackendErrorCodes.IncorrectClientPrice);
     }
 
     private static bool IsPurchaseAllowed(
