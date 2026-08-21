@@ -78,10 +78,43 @@ public sealed class BronzemanRagfairRouterCallback(
         }
 
         var data = root?["data"] as JsonObject;
-        if (data is null || data["offers"] is not JsonArray offers)
+        if (data is null)
             return new ValueTask<string>(output);
 
         var profile = bronzemanMod.GetPlayer(sessionId);
+
+        // SPT returns the flea browser's left-side item tree as a dictionary
+        // of template id -> offer count in data.categories. Remove locked root
+        // templates here so unopened items do not appear as selectable entries
+        // that only lead to an empty offer page.
+        if (data["categories"] is JsonObject categories)
+        {
+            var originalCategoryCount = categories.Count;
+            var categoryKeys = categories
+                .Select(category => category.Key)
+                .ToList();
+
+            foreach (var templateId in categoryKeys)
+            {
+                if (!string.IsNullOrEmpty(templateId)
+                    && bronzemanMod.CanPurchase(profile, templateId))
+                {
+                    continue;
+                }
+
+                categories.Remove(templateId);
+            }
+
+            if (config.Debug)
+            {
+                Console.WriteLine(
+                    $"[bronzeman] Returning {categories.Count}/{originalCategoryCount} flea category entries using Bronzeman filter");
+            }
+        }
+
+        if (data["offers"] is not JsonArray offers)
+            return new ValueTask<string>(root?.ToJsonString() ?? output);
+
         var originalCount = offers.Count;
 
         for (var index = offers.Count - 1; index >= 0; index--)
