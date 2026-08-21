@@ -52,6 +52,9 @@ public sealed class UnlockConfig
     [JsonPropertyName("inventory")]
     public bool Inventory { get; set; } = true;
 
+    [JsonPropertyName("mail")]
+    public bool Mail { get; set; } = true;
+
     [JsonPropertyName("quests")]
     public bool Quests { get; set; } = true;
 
