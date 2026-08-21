@@ -1,4 +1,5 @@
 using System.Reflection;
+using Comfort.Common;
 using EFT;
 using EFT.UI;
 using HarmonyLib;
