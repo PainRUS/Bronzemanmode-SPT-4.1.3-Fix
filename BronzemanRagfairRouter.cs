@@ -55,6 +55,17 @@ public sealed class BronzemanRagfairRouterCallback(
         if (!config.IncludeRagfair)
             return new ValueTask<string>(output);
 
+        if (config.DebugShowLockedItems)
+        {
+            if (config.Debug)
+            {
+                Console.WriteLine(
+                    $"[bronzeman] debugShowLockedItems=true; flea display filtering bypassed for URL={url}. Purchase guard remains active.");
+            }
+
+            return new ValueTask<string>(output);
+        }
+
         if (config.Debug)
         {
             Console.WriteLine(
