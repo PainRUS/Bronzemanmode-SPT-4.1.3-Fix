@@ -7,10 +7,12 @@ using SPTarkov.Server.Core.Utils;
 
 namespace Bronzeman;
 
-// Ragfair filtering must run after SPT has produced its search response.
-// SPT 4.1.x exposes both /client/ragfair/find and /client/ragfair/search;
-// different EFT UI entry points can use either route.
-[Injectable(TypePriority = OnLoadOrder.Routers + 1)]
+// Ragfair filtering must run after the route that produced the search response.
+// SPT 4.1.x exposes both /client/ragfair/find and /client/ragfair/search.
+// UI Fixes 6.x also exposes /uifixes/ragfair/find for slot-specific linked searches.
+// UI Fixes registers its router at OnLoadOrder.Routers + 1, so Bronzeman uses +2
+// to guarantee that its post-filter receives the completed UI Fixes flea response.
+[Injectable(TypePriority = OnLoadOrder.Routers + 2)]
 public sealed class BronzemanRagfairRouter(
     JsonUtil jsonUtil,
     BronzemanRagfairRouterCallback callback)
@@ -24,6 +26,13 @@ public sealed class BronzemanRagfairRouter(
                     output ?? string.Empty)),
         new RouteAction<EmptyRequestData>(
             "/client/ragfair/search",
+            async (url, info, sessionId, output, cancellationToken) =>
+                await callback.Handle(
+                    url,
+                    sessionId,
+                    output ?? string.Empty)),
+        new RouteAction<EmptyRequestData>(
+            "/uifixes/ragfair/find",
             async (url, info, sessionId, output, cancellationToken) =>
                 await callback.Handle(
                     url,
