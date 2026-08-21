@@ -13,7 +13,7 @@ public sealed class BronzemanTraderRouter(
     BronzemanConfig config)
     : DynamicRouter(jsonUtil, [
         new RouteAction<EmptyRequestData>(
-            "/client/trading/api/getTraderAssort",
+            "/client/trading/api/getTraderAssort/",
             async (url, info, sessionId, output, cancellationToken) =>
                 await Handle(
                     url,
@@ -23,6 +23,8 @@ public sealed class BronzemanTraderRouter(
                     output ?? string.Empty))
     ])
 {
+    private const string TraderAssortRoute = "/client/trading/api/getTraderAssort/";
+
     private static ValueTask<string> Handle(
         string url,
         BronzemanConfig config,
@@ -30,12 +32,30 @@ public sealed class BronzemanTraderRouter(
         string sessionId,
         string output)
     {
-        if (config.Debug) Console.WriteLine(
-            $"[bronzeman] Trader post-route handler called. URL={url}, outputLength={output?.Length ?? 0}");
+        var traderId = GetTraderId(url);
+
+        if (!ShouldFilterTrader(config, traderId))
+        {
+            if (config.Debug)
+            {
+                Console.WriteLine(
+                    $"[bronzeman] Trader '{traderId ?? "unknown"}' is outside configured Bronzeman scope; assort unchanged.");
+            }
+
+            return new ValueTask<string>(output);
+        }
+
+        if (config.Debug)
+        {
+            Console.WriteLine(
+                $"[bronzeman] Trader post-route handler called. Trader={traderId}, URL={url}, outputLength={output.Length}");
+        }
 
         if (string.IsNullOrWhiteSpace(output))
         {
-            if (config.Debug) Console.WriteLine("[bronzeman] Trader post-route output was empty; nothing to filter.");
+            if (config.Debug)
+                Console.WriteLine("[bronzeman] Trader post-route output was empty; nothing to filter.");
+
             return new ValueTask<string>(output);
         }
 
@@ -61,8 +81,8 @@ public sealed class BronzemanTraderRouter(
             data = root;
             items = directItems;
         }
-        else if (root["data"] is JsonObject wrappedData &&
-                 wrappedData["items"] is JsonArray wrappedItems)
+        else if (root["data"] is JsonObject wrappedData
+                 && wrappedData["items"] is JsonArray wrappedItems)
         {
             data = wrappedData;
             items = wrappedItems;
@@ -70,50 +90,38 @@ public sealed class BronzemanTraderRouter(
 
         if (data is null || items is null)
         {
-            if (config.Debug) Console.WriteLine(
-                $"[bronzeman] Trader route matched, but no assort items array found. URL: {url}");
+            if (config.Debug)
+            {
+                Console.WriteLine(
+                    $"[bronzeman] Trader route matched, but no assort items array found. URL: {url}");
+            }
 
             return new ValueTask<string>(output);
         }
 
         var profile = bronzemanMod.GetPlayer(sessionId);
 
-        if (config.Debug) Console.WriteLine(
-            "[bronzeman] Trader filter using CanPurchase() so ignored parent categories are respected.");
-
         var allItems = items
             .OfType<JsonObject>()
             .ToList();
 
-        var byId = allItems
-            .Where(x => !string.IsNullOrEmpty(x["_id"]?.ToString()))
-            .ToDictionary(
-                x => x["_id"]!.ToString(),
-                x => x,
-                StringComparer.OrdinalIgnoreCase);
-
         var rootItems = allItems
-            .Where(x => string.Equals(
-                x["parentId"]?.ToString(),
+            .Where(item => string.Equals(
+                item["parentId"]?.ToString(),
                 "hideout",
                 StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         var originalRootCount = rootItems.Count;
-
-        var rootIdsToRemove = new HashSet<string>(
-            StringComparer.OrdinalIgnoreCase);
+        var rootIdsToRemove = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var rootItem in rootItems)
         {
             var rootId = rootItem["_id"]?.ToString() ?? string.Empty;
             var rootTpl = rootItem["_tpl"]?.ToString() ?? string.Empty;
 
-            if (string.IsNullOrEmpty(rootId) ||
-                string.IsNullOrEmpty(rootTpl))
-            {
+            if (string.IsNullOrEmpty(rootId) || string.IsNullOrEmpty(rootTpl))
                 continue;
-            }
 
             var offerAllowed = bronzemanMod.CanPurchase(profile, rootTpl);
 
@@ -123,8 +131,8 @@ public sealed class BronzemanTraderRouter(
                 {
                     var childTpl = child["_tpl"]?.ToString() ?? string.Empty;
 
-                    if (string.IsNullOrEmpty(childTpl) ||
-                        !bronzemanMod.CanPurchase(profile, childTpl))
+                    if (string.IsNullOrEmpty(childTpl)
+                        || !bronzemanMod.CanPurchase(profile, childTpl))
                     {
                         offerAllowed = false;
                         break;
@@ -133,37 +141,31 @@ public sealed class BronzemanTraderRouter(
             }
 
             if (!offerAllowed)
-            {
                 rootIdsToRemove.Add(rootId);
-            }
         }
 
         if (config.HideItems)
         {
-            var allIdsToRemove = new HashSet<string>(
-                rootIdsToRemove,
-                StringComparer.OrdinalIgnoreCase);
+            var allIdsToRemove = new HashSet<string>(rootIdsToRemove, StringComparer.OrdinalIgnoreCase);
 
             foreach (var rootId in rootIdsToRemove)
             {
                 foreach (var child in GetOfferTree(rootId, allItems))
                 {
                     var childId = child["_id"]?.ToString();
-
                     if (!string.IsNullOrEmpty(childId))
                         allIdsToRemove.Add(childId);
                 }
             }
 
-            for (var i = items.Count - 1; i >= 0; i--)
+            for (var index = items.Count - 1; index >= 0; index--)
             {
-                if (items[i] is not JsonObject item)
+                if (items[index] is not JsonObject item)
                     continue;
 
                 var id = item["_id"]?.ToString() ?? string.Empty;
-
                 if (allIdsToRemove.Contains(id))
-                    items.RemoveAt(i);
+                    items.RemoveAt(index);
             }
 
             RemoveDictionaryEntries(data, "barter_scheme", rootIdsToRemove);
@@ -179,30 +181,53 @@ public sealed class BronzemanTraderRouter(
                     continue;
 
                 var id = item["_id"]?.ToString() ?? string.Empty;
-
                 if (!rootIdsToRemove.Contains(id))
                     continue;
 
                 var upd = item["upd"] as JsonObject ?? new JsonObject();
-
                 upd["UnlimitedCount"] = false;
                 upd["StackObjectsCount"] = 0;
-
                 item["upd"] = upd;
             }
         }
 
         var remainingRootCount = items.Count(node =>
-            node is JsonObject obj &&
-            string.Equals(
+            node is JsonObject obj
+            && string.Equals(
                 obj["parentId"]?.ToString(),
                 "hideout",
                 StringComparison.OrdinalIgnoreCase));
 
-        if (config.Debug) Console.WriteLine(
-            $"[bronzeman] Returning {remainingRootCount}/{originalRootCount} trader offers using Bronzeman allow-list.");
+        if (config.Debug)
+        {
+            Console.WriteLine(
+                $"[bronzeman] Returning {remainingRootCount}/{originalRootCount} trader offers using Bronzeman allow-list.");
+        }
 
         return new ValueTask<string>(root.ToJsonString());
+    }
+
+    private static string? GetTraderId(string url)
+    {
+        var routeIndex = url.IndexOf(TraderAssortRoute, StringComparison.OrdinalIgnoreCase);
+        if (routeIndex < 0)
+            return null;
+
+        var start = routeIndex + TraderAssortRoute.Length;
+        if (start >= url.Length)
+            return null;
+
+        var traderId = url[start..].Trim('/');
+        return string.IsNullOrWhiteSpace(traderId) ? null : traderId;
+    }
+
+    private static bool ShouldFilterTrader(BronzemanConfig config, string? traderId)
+    {
+        if (config.AllTraders)
+            return true;
+
+        return !string.IsNullOrWhiteSpace(traderId)
+               && config.Traders.Contains(traderId, StringComparer.OrdinalIgnoreCase);
     }
 
     private static IEnumerable<JsonObject> GetOfferTree(
@@ -210,14 +235,12 @@ public sealed class BronzemanTraderRouter(
         List<JsonObject> allItems)
     {
         var result = new List<JsonObject>();
-        var knownParents = new HashSet<string>(
-            StringComparer.OrdinalIgnoreCase)
+        var knownParents = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             rootId
         };
 
         var changed = true;
-
         while (changed)
         {
             changed = false;
@@ -227,10 +250,10 @@ public sealed class BronzemanTraderRouter(
                 var id = item["_id"]?.ToString() ?? string.Empty;
                 var parentId = item["parentId"]?.ToString() ?? string.Empty;
 
-                if (string.IsNullOrEmpty(id) ||
-                    string.IsNullOrEmpty(parentId) ||
-                    !knownParents.Contains(parentId) ||
-                    knownParents.Contains(id))
+                if (string.IsNullOrEmpty(id)
+                    || string.IsNullOrEmpty(parentId)
+                    || !knownParents.Contains(parentId)
+                    || knownParents.Contains(id))
                 {
                     continue;
                 }
