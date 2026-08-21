@@ -35,6 +35,16 @@ public sealed class Plugin : BaseUnityPlugin
         {
             Logger.LogError($"Bronzeman client failed to apply blocked-purchase notification patch: {exception}");
         }
+
+        try
+        {
+            new PurchaseBlockedWarningSuppressionPatch().Enable();
+            Logger.LogInfo("Bronzeman blocked-purchase warning suppression enabled.");
+        }
+        catch (System.Exception exception)
+        {
+            Logger.LogError($"Bronzeman client failed to apply blocked-purchase warning suppression patch: {exception}");
+        }
     }
 
     private void Update()
