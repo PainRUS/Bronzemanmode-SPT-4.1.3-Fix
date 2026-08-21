@@ -45,6 +45,17 @@ public sealed class BronzemanTraderRouter(
             return new ValueTask<string>(output);
         }
 
+        if (config.DebugShowLockedItems)
+        {
+            if (config.Debug)
+            {
+                Console.WriteLine(
+                    $"[bronzeman] debugShowLockedItems=true; trader '{traderId}' display filtering bypassed. Purchase guard remains active.");
+            }
+
+            return new ValueTask<string>(output);
+        }
+
         if (config.Debug)
         {
             Console.WriteLine(
