@@ -36,4 +36,12 @@ public sealed class Plugin : BaseUnityPlugin
             Logger.LogError($"Bronzeman client failed to apply blocked-purchase notification patch: {exception}");
         }
     }
+
+    private void Update()
+    {
+        // Websocket callbacks are not guaranteed to execute on Unity's main
+        // thread. Drain Bronzeman notification requests here so the native EFT UI
+        // notification method is always invoked safely from the Unity update loop.
+        PurchaseBlockedNotificationPatch.DisplayPendingNotifications();
+    }
 }
