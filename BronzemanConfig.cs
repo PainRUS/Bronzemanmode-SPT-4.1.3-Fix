@@ -8,7 +8,7 @@ public sealed class BronzemanConfig
     public UnlockConfig Unlocks { get; set; } = new();
 
     [JsonPropertyName("hideItems")]
-    public bool HideItems { get; set; }
+    public bool HideItems { get; set; } = true;
 
     [JsonPropertyName("allTraders")]
     public bool AllTraders { get; set; }
@@ -17,7 +17,7 @@ public sealed class BronzemanConfig
     public List<string> Traders { get; set; } = [];
 
     [JsonPropertyName("includeRagfair")]
-    public bool IncludeRagfair { get; set; }
+    public bool IncludeRagfair { get; set; } = true;
 
     [JsonPropertyName("ignoreCategories")]
     public IgnoreCategoriesConfig IgnoreCategories { get; set; } = new();
@@ -26,34 +26,34 @@ public sealed class BronzemanConfig
     public List<string> IgnoreItems { get; set; } = [];
 
     [JsonPropertyName("requireUnlockComponents")]
-    public bool RequireUnlockComponents { get; set; }
+    public bool RequireUnlockComponents { get; set; } = true;
 
     [JsonPropertyName("debug")]
     public bool Debug { get; set; }
 
     [JsonPropertyName("wishlisttype")]
-    public int WishlistType { get; set; }
+    public int WishlistType { get; set; } = 4;
 
     [JsonPropertyName("gunsmith")]
-    public int GunsmithWishlistType { get; set; }
+    public int GunsmithWishlistType { get; set; } = 3;
 
     [JsonPropertyName("gunsmithcount")]
-    public int GunsmithCount { get; set; }
+    public int GunsmithCount { get; set; } = 25;
 }
 
 public sealed class UnlockConfig
 {
     [JsonPropertyName("raidRunThrough")]
-    public bool RaidRunThrough { get; set; }
+    public bool RaidRunThrough { get; set; } = true;
 
     [JsonPropertyName("raidDeath")]
     public bool RaidDeath { get; set; }
 
     [JsonPropertyName("inventory")]
-    public bool Inventory { get; set; }
+    public bool Inventory { get; set; } = true;
 
     [JsonPropertyName("quests")]
-    public bool Quests { get; set; }
+    public bool Quests { get; set; } = true;
 
     [JsonPropertyName("foundInRaidOnly")]
     public bool FoundInRaidOnly { get; set; }
@@ -61,11 +61,11 @@ public sealed class UnlockConfig
 
 public sealed class IgnoreCategoriesConfig
 {
-    public bool Keys { get; set; }
-    public bool SpecialEquipment { get; set; }
-    public bool SecureContainers { get; set; }
-    public bool Maps { get; set; }
-    public bool Money { get; set; }
+    public bool Keys { get; set; } = true;
+    public bool SpecialEquipment { get; set; } = true;
+    public bool SecureContainers { get; set; } = true;
+    public bool Maps { get; set; } = true;
+    public bool Money { get; set; } = true;
     public bool FoodAndDrink { get; set; }
     public bool BarterItems { get; set; }
     public bool MeleeWeapons { get; set; }
@@ -81,7 +81,7 @@ public sealed class IgnoreCategoriesConfig
     public bool ArmBands { get; set; }
     public bool Ammo { get; set; }
     public bool AmmoBoxes { get; set; }
-    public bool Containers { get; set; }
+    public bool Containers { get; set; } = true;
 }
 
 public sealed class GunsmithConfig
