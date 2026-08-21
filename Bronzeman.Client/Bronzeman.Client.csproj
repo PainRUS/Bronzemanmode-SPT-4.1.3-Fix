@@ -37,5 +37,13 @@
       <HintPath>$(SptGamePath)\BepInEx\core\BepInEx.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(SptGamePath)\EscapeFromTarkov_Data\Managed\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(SptGamePath)\EscapeFromTarkov_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 </Project>
