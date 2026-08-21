@@ -72,12 +72,10 @@ public sealed class BronzemanPurchaseGuardItemRouter(
     private static readonly MongoId RussianBlockedNotificationId = new("b10c0ed00000000000000001");
     private static readonly MongoId EnglishBlockedNotificationId = new("b10c0ed00000000000000002");
 
-    // EFT treats IncorrectClientPrice (1519) as a failed inventory operation, so
-    // trader/flea UIs do not execute their successful-purchase paths. Its native
-    // InventoryWarning.TryGetMessage intentionally returns false, so it does not
-    // open the normal inventory-error UI. The visible denial is delivered through
-    // the separate Bronzeman websocket toast instead.
-    private const string BlockedPurchaseFailureMarker = "BRONZEMAN_PURCHASE_BLOCKED";
+    // This marker is never intended for presentation. Bronzeman.Client recognizes
+    // it on the non-critical item warning and suppresses EFT's stock warning UI.
+    // The actual player-facing message is transported independently by websocket.
+    internal const string BlockedPurchaseFailureMarker = "BRONZEMAN_PURCHASE_BLOCKED";
 
     private static async ValueTask<ItemEventRouterResponse> HandleTraderTrade(
         TradeCallbacks tradeCallbacks,
@@ -193,15 +191,21 @@ public sealed class BronzemanPurchaseGuardItemRouter(
         HttpResponseUtil httpResponseUtil,
         ItemEventRouterResponse output)
     {
-        // Do not return an empty successful response. EFT uses result.Succeed to
-        // show the native "item purchased" notification and to apply successful
-        // flea-purchase UI behavior even when the server intentionally performed
-        // no transaction. Code 1519 produces a failed callback result while its
-        // native warning presentation is deliberately silent.
+        // SPT 4.1.3 ItemEventCallbacks promotes every warning except
+        // BackendErrorCodes.NotEnoughSpace (1505) to an outer backend error. An
+        // outer error drives EFT's InventoryErrorHappened path and produces the
+        // blocking "Critical error" screen. Therefore 1505 is deliberately used
+        // only as the transport code for this rejected operation.
+        //
+        // The response envelope remains successful, but the waiting purchase
+        // callback converts this warning to a FailedResult. Trader/flea UI code
+        // therefore does not execute its successful-purchase branch. A dedicated
+        // Bronzeman.Client patch suppresses presentation of this marker warning,
+        // while the websocket toast supplies the real user-facing message.
         return httpResponseUtil.AppendErrorToOutput(
             output,
             BlockedPurchaseFailureMarker,
-            BackendErrorCodes.IncorrectClientPrice);
+            BackendErrorCodes.NotEnoughSpace);
     }
 
     private static bool IsPurchaseAllowed(
