@@ -20,6 +20,12 @@
     <PackageReference Include="SPTarkov.Reflection" Version="4.1.2" />
   </ItemGroup>
 
+  <!-- The optional BepInEx companion is a separate netstandard2.1 project and
+       must never be compiled into the SPT server assembly. -->
+  <ItemGroup>
+    <Compile Remove="Bronzeman.Client/**/*.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Update="config.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="gunsmith.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
