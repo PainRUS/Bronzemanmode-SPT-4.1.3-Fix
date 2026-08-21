@@ -11,9 +11,10 @@ using SPTarkov.Server.Core.Models.Eft.Common.Tables;
 using SPTarkov.Server.Core.Models.Eft.ItemEvent;
 using SPTarkov.Server.Core.Models.Eft.Profile;
 using SPTarkov.Server.Core.Models.Eft.Trade;
+using SPTarkov.Server.Core.Models.Eft.Ws;
 using SPTarkov.Server.Core.Models.Enums;
+using SPTarkov.Server.Core.Servers.Ws;
 using SPTarkov.Server.Core.Services.Ragfair;
-using SPTarkov.Server.Core.Utils;
 
 namespace Bronzeman;
 
@@ -26,7 +27,7 @@ public sealed class BronzemanPurchaseGuardItemRouter(
     TradeCallbacks tradeCallbacks,
     TraderAssortHelper traderAssortHelper,
     RagfairOfferService ragfairOfferService,
-    HttpResponseUtil httpResponseUtil,
+    SptWebSocketConnectionHandler webSocketConnectionHandler,
     BronzemanMod bronzemanMod,
     BronzemanConfig config,
     BronzemanLocaleState localeState,
@@ -38,7 +39,7 @@ public sealed class BronzemanPurchaseGuardItemRouter(
                 await HandleTraderTrade(
                     tradeCallbacks,
                     traderAssortHelper,
-                    httpResponseUtil,
+                    webSocketConnectionHandler,
                     bronzemanMod,
                     config,
                     localeState,
@@ -53,7 +54,7 @@ public sealed class BronzemanPurchaseGuardItemRouter(
                 await HandleRagfairTrade(
                     tradeCallbacks,
                     ragfairOfferService,
-                    httpResponseUtil,
+                    webSocketConnectionHandler,
                     bronzemanMod,
                     config,
                     localeState,
@@ -64,10 +65,13 @@ public sealed class BronzemanPurchaseGuardItemRouter(
                     output))
     ])
 {
-    private static ValueTask<ItemEventRouterResponse> HandleTraderTrade(
+    private static readonly MongoId RussianBlockedNotificationId = new("b10c0ed00000000000000001");
+    private static readonly MongoId EnglishBlockedNotificationId = new("b10c0ed00000000000000002");
+
+    private static async ValueTask<ItemEventRouterResponse> HandleTraderTrade(
         TradeCallbacks tradeCallbacks,
         TraderAssortHelper traderAssortHelper,
-        HttpResponseUtil httpResponseUtil,
+        SptWebSocketConnectionHandler webSocketConnectionHandler,
         BronzemanMod bronzemanMod,
         BronzemanConfig config,
         BronzemanLocaleState localeState,
@@ -82,7 +86,7 @@ public sealed class BronzemanPurchaseGuardItemRouter(
             || request is not ProcessBuyTradeRequestData buyRequest
             || !ShouldGuardTrader(config, buyRequest.TransactionId))
         {
-            return tradeCallbacks.ProcessTrade(pmcData, request, sessionId);
+            return await tradeCallbacks.ProcessTrade(pmcData, request, sessionId);
         }
 
         var assort = traderAssortHelper.GetAssort(sessionId, buyRequest.TransactionId);
@@ -90,11 +94,11 @@ public sealed class BronzemanPurchaseGuardItemRouter(
 
         // Preserve native SPT error handling for stale/invalid assort IDs.
         if (purchaseItems.Count == 0)
-            return tradeCallbacks.ProcessTrade(pmcData, request, sessionId);
+            return await tradeCallbacks.ProcessTrade(pmcData, request, sessionId);
 
         var profile = bronzemanMod.GetPlayer(sessionId);
         if (IsPurchaseAllowed(bronzemanMod, config, profile, purchaseItems, buyRequest.ItemId))
-            return tradeCallbacks.ProcessTrade(pmcData, request, sessionId);
+            return await tradeCallbacks.ProcessTrade(pmcData, request, sessionId);
 
         if (config.Debug)
         {
@@ -103,13 +107,24 @@ public sealed class BronzemanPurchaseGuardItemRouter(
                 $"Trader={buyRequest.TransactionId}, assort={buyRequest.ItemId}.");
         }
 
-        return new ValueTask<ItemEventRouterResponse>(BlockPurchase(httpResponseUtil, localeState, sessionId, output));
+        await SendBlockedPurchaseNotification(
+            webSocketConnectionHandler,
+            localeState,
+            sessionId,
+            logger,
+            config.Debug);
+
+        // Deliberately return the untouched ItemEvent response. A warning/error
+        // makes EFT show a critical modal and can eject the player to the main
+        // menu. The purchase itself has already been rejected because native SPT
+        // trade processing is never entered.
+        return output;
     }
 
-    private static ValueTask<ItemEventRouterResponse> HandleRagfairTrade(
+    private static async ValueTask<ItemEventRouterResponse> HandleRagfairTrade(
         TradeCallbacks tradeCallbacks,
         RagfairOfferService ragfairOfferService,
-        HttpResponseUtil httpResponseUtil,
+        SptWebSocketConnectionHandler webSocketConnectionHandler,
         BronzemanMod bronzemanMod,
         BronzemanConfig config,
         BronzemanLocaleState localeState,
@@ -120,7 +135,7 @@ public sealed class BronzemanPurchaseGuardItemRouter(
         ItemEventRouterResponse output)
     {
         if (!config.IncludeRagfair || request.Offers is null || request.Offers.Count == 0)
-            return tradeCallbacks.ProcessRagfairTrade(pmcData, request, sessionId);
+            return await tradeCallbacks.ProcessRagfairTrade(pmcData, request, sessionId);
 
         var profile = bronzemanMod.GetPlayer(sessionId);
 
@@ -132,14 +147,14 @@ public sealed class BronzemanPurchaseGuardItemRouter(
                 || !MongoId.IsValidMongoId(requestedOffer.Id))
             {
                 // Preserve native handling for malformed/stale requests.
-                return tradeCallbacks.ProcessRagfairTrade(pmcData, request, sessionId);
+                return await tradeCallbacks.ProcessRagfairTrade(pmcData, request, sessionId);
             }
 
             var offer = ragfairOfferService.GetOfferByOfferId(new MongoId(requestedOffer.Id));
             if (offer?.Items is null || offer.Items.Count == 0)
             {
                 // Native SPT owns OfferNotFound/out-of-stock behavior.
-                return tradeCallbacks.ProcessRagfairTrade(pmcData, request, sessionId);
+                return await tradeCallbacks.ProcessRagfairTrade(pmcData, request, sessionId);
             }
 
             if (IsPurchaseAllowed(bronzemanMod, config, profile, offer.Items, offer.Root))
@@ -152,10 +167,17 @@ public sealed class BronzemanPurchaseGuardItemRouter(
                     $"Offer={offer.Id}, root={offer.Root}.");
             }
 
-            return new ValueTask<ItemEventRouterResponse>(BlockPurchase(httpResponseUtil, localeState, sessionId, output));
+            await SendBlockedPurchaseNotification(
+                webSocketConnectionHandler,
+                localeState,
+                sessionId,
+                logger,
+                config.Debug);
+
+            return output;
         }
 
-        return tradeCallbacks.ProcessRagfairTrade(pmcData, request, sessionId);
+        return await tradeCallbacks.ProcessRagfairTrade(pmcData, request, sessionId);
     }
 
     private static bool IsPurchaseAllowed(
@@ -191,15 +213,31 @@ public sealed class BronzemanPurchaseGuardItemRouter(
         return config.Traders.Contains(traderIdString, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static ItemEventRouterResponse BlockPurchase(
-        HttpResponseUtil httpResponseUtil,
+    private static async Task SendBlockedPurchaseNotification(
+        SptWebSocketConnectionHandler webSocketConnectionHandler,
         BronzemanLocaleState localeState,
         MongoId sessionId,
-        ItemEventRouterResponse output)
+        ISptLogger<BronzemanPurchaseGuardItemRouter> logger,
+        bool debug)
     {
-        return httpResponseUtil.AppendErrorToOutput(
-            output,
-            localeState.GetPurchaseBlockedMessage(sessionId),
-            BackendErrorCodes.UnknownTradingError);
+        if (!webSocketConnectionHandler.IsWebSocketConnected(sessionId))
+        {
+            if (debug)
+                logger.Warning("[bronzeman] Purchase blocked, but no active EFT websocket was available for the toast notification.");
+
+            return;
+        }
+
+        var notification = new WsNotificationPopup
+        {
+            EventType = NotificationEventType.NotificationPopup,
+            EventIdentifier = new MongoId(),
+            Image = string.Empty,
+            Message = localeState.IsRussian(sessionId)
+                ? RussianBlockedNotificationId
+                : EnglishBlockedNotificationId,
+        };
+
+        await webSocketConnectionHandler.SendMessageAsync(sessionId, notification);
     }
 }
