@@ -1,90 +1,94 @@
-# Bronzemanmode — SPT 4.1.3 Compatibility Work
+# Bronzemanmode for SPT 4.1.3
 
-> **Status:** unofficial compatibility/fix branch for Bronzemanmode 2.0.0. This is not an official upstream release.
+> **Status:** personal development version of Bronzemanmode for SPT 4.1.3.
 
-This repository contains compatibility fixes and additional integration work for **Bronzemanmode** on **SPT 4.1.3**.
+This repository is a continuation of **Bronzemanmode**, currently maintained and developed primarily for my own SPT setup.
 
-The work is based directly on the original author's `Bronzemanmode_2.0.0` branch at commit `4ee3da8591dde73a1cec1c79f89a3c01580cccf2`.
+The project is public so other users can inspect the source, follow development, test it, or use the builds if they find them useful. However, this is first and foremost a personal project rather than an official release for The Forge / SP-Mod.
 
-Original author / upstream repository: **Randek003**  
+## Important: LLM-assisted development
+
+This project is developed with **substantial LLM/AI assistance, primarily ChatGPT**.
+
+I define the desired behaviour, features, requirements and testing direction. ChatGPT is used to analyse the existing codebase and SPT APIs, suggest implementation approaches, and write a significant part of the implementation. I then compile the mod, test it in a live SPT installation, reproduce issues, provide logs and feedback, choose between implementation approaches, and validate the resulting behaviour.
+
+Because substantial parts of the new compatibility work and features are written with LLM assistance, this project **does not meet The Forge / SP-Mod AI-generated content policy and will not be submitted there** under the current development workflow.
+
+The relevant policy can be found here:
+
+https://sp-mod.com/content-guidelines#ai-generated-content-policy
+
+This disclosure is intentionally kept public so there is no ambiguity about how the project is developed.
+
+## Project history
+
+Bronzemanmode was originally created by **KcY / KeiranY**.
+
+Original project:
+https://github.com/KeiranY/tarkov-bronzeman
+
+The mod was later ported and maintained for newer SPT versions by **Randek003**.
+
+Randek003's repository:
 https://github.com/Randek003/Bronzemanmode
 
-Current compatibility repository:  
+SP-Mod / The Forge page for Randek003's port:
+https://sp-mod.com/mod/1623/bronzemanmode-by-kcy-39-port
+
+The SPT 4.1+ development work in this repository is maintained by **PainRUS** with permission from Randek003.
+
+Current repository:
 https://github.com/PainRUS/Bronzemanmode-SPT-4.1.3-Fix
 
-## What was fixed or added
+## What Bronzemanmode does
 
-### SPT 4.1.3 compatibility
+Bronzemanmode changes progression so items generally need to be earned before they can be freely purchased from traders or the flea market.
 
-- Updated raid-end handling to the SPT 4.1.x local raid flow (`/client/match/local/end`).
-- Fixed wishlist handling for the current SPT profile model where wishlist data is dictionary-based.
-- Corrected trader filtering so `allTraders` and configured trader IDs are respected.
-- Updated quest reward handling for current SPT APIs.
-- Separated physical-item FIR checks from template-based unlocks so quest/mail rewards are not incorrectly blocked by `foundInRaidOnly`.
-- Added a Gunsmith quest-ID fallback for the Part 1 data mismatch.
-- Kept Bronzeman unlock state persistent in the player profile.
+Depending on configuration, items can be unlocked through raids, inventory ownership, quest rewards and other supported sources. The goal is to keep the original Bronzeman progression idea while improving compatibility and quality of life for newer SPT versions.
 
-### Mail attachment unlocks
+## SPT 4.1.3 work
 
-Items received through in-game mail can now unlock immediately.
+Current compatibility work includes:
 
-The mail handler:
-
-- runs after SPT's native item-move processing;
-- supports the relevant mail move/split/merge/transfer actions;
-- unlocks the received root item and attached child templates;
-- saves the profile immediately;
-- removes Bronzeman-managed wishlist entries for newly unlocked templates.
-
-This includes assembled weapons: receiving a weapon through mail unlocks the weapon and its attached components.
-
-### Immediate client wishlist synchronization
-
-SPT's item-event response does not automatically update EFT's in-memory `WishlistManager` after Bronzeman changes the authoritative server profile.
-
-To solve that, this repository adds an optional BepInEx client companion:
-
-- `Bronzeman.Client.dll`
-
-After the mail transfer screen closes, the client:
-
-1. waits for the EFT/SPT inventory operation queue to finish;
-2. requests the authoritative wishlist from the Bronzeman server mod;
-3. reconciles EFT's local explicit wishlist entries;
-4. calls the native wishlist manager methods so the UI updates without restarting the game.
-
-The synchronization intentionally operates on explicit `UserItems` rather than the full generated wishlist so client-generated QoL/hideout entries are not removed.
+- updated raid-end handling for the SPT 4.1.x local raid flow;
+- wishlist handling updated for the current SPT profile model;
+- corrected trader filtering;
+- updated quest reward handling for current SPT APIs;
+- separated physical-item FIR checks from template-based unlocks;
+- Gunsmith quest-ID fallback for the Part 1 data mismatch;
+- persistent Bronzeman unlock state in the player profile;
+- mail attachment unlock support;
+- assembled weapons received through mail can unlock the weapon and attached components;
+- immediate client-side wishlist synchronization through an optional BepInEx companion plugin.
 
 ## Version
 
-Current compatibility build: **2.0.3**  
+Current development build: **2.0.3**  
 Target: **SPT 4.1.3**
 
-## Live validation
+## Validation
 
-The 2.0.3 compatibility build has been manually compiled and live-tested on SPT 4.1.3 with an existing test profile and a 24-mod setup.
+The current build has been manually compiled and tested on SPT 4.1.3 with an existing profile and a multi-mod setup.
 
 Validated scenarios include:
 
-- server mod loads successfully on SPT 4.1.3;
-- existing Bronzeman unlock data persists across profile reloads;
-- wishlist initialization works without the previous runtime binder crash;
-- successful raid unlocks new items and attached weapon components;
-- death with `raidDeath: false` does not trigger raid-based unlocks;
-- inventory scanning remains independent and follows `inventory: true/false`;
-- mail attachments unlock immediately;
-- assembled weapons received through mail unlock root + attached component templates;
-- flea/trader availability reflects mail unlocks immediately;
-- client wishlist state updates immediately after closing the transfer screen;
-- tested alongside UI Fixes and ReceiveAllChats in the validated mail scenario.
+- server mod loading successfully;
+- existing Bronzeman unlock data surviving profile reloads;
+- wishlist initialization;
+- successful raid unlocks;
+- attached weapon component unlocks;
+- raid-death configuration behaviour;
+- inventory unlock configuration behaviour;
+- immediate mail attachment unlocks;
+- assembled weapon mail rewards;
+- flea/trader availability after mail unlocks;
+- client wishlist synchronization after closing the mail transfer screen.
 
-Not every possible configuration combination has been tested. In particular, treat untested combinations and third-party mod interactions as needing their own validation.
+Not every configuration or third-party mod combination has been tested.
 
 ## Build
 
 ### Server mod
-
-Requires a .NET SDK capable of building the server project.
 
 ```powershell
 dotnet build .\Bronzeman.csproj -c Release
@@ -98,9 +102,7 @@ bin\Release\net10.0\Bronzeman.dll
 
 ### Client companion
 
-The client project must be built against the DLLs from the local SPT 4.1.3 installation.
-
-Example:
+The client project must be built against the DLLs from a local SPT 4.1.3 installation.
 
 ```powershell
 dotnet build .\Bronzeman.Client\Bronzeman.Client.csproj -c Release -p:SptGamePath="C:\Games\SPT"
@@ -116,13 +118,13 @@ Bronzeman.Client\bin\Release\netstandard2.1\Bronzeman.Client.dll
 
 ### Server
 
-Replace the Bronzeman server DLL in the installed server-mod directory with the newly built:
+Replace the Bronzeman server DLL in the installed server-mod directory with:
 
 ```text
 Bronzeman.dll
 ```
 
-Keep the existing user configuration files unless intentionally changing settings.
+Keep the existing configuration files unless intentionally changing settings.
 
 ### Client
 
@@ -138,38 +140,17 @@ under a BepInEx plugins directory, for example:
 SPT\BepInEx\plugins\Bronzeman\Bronzeman.Client.dll
 ```
 
-Then fully restart the SPT server and EFT client.
+Then restart the SPT server and EFT client.
 
-A successful client load should log:
+## License
 
-```text
-Bronzeman client wishlist synchronization enabled.
-```
+This repository uses **The Unlicense**, the same license used by the original Bronzeman Mode project.
 
-## Configuration compatibility
-
-The mail unlock option has a code default of enabled. Existing configs that do not yet contain an explicit `mail` property continue to work with the default behavior.
-
-No configuration migration was required for the live-tested profile.
-
-## Upstream contribution
-
-The intention of this repository is to make the fixes reviewable and easy to contribute back to the original Bronzemanmode project.
-
-It is **not intended to replace the original author's project or claim authorship of Bronzemanmode**.
-
-A clean upstream pull request can be prepared against the original `Bronzemanmode_2.0.0` branch if the author wants to integrate these changes.
-
-## AI-assisted development disclosure
-
-Substantial LLM/AI assistance was used during analysis and implementation of this compatibility work, including investigation of SPT 4.1.3 API changes and development of the mail/client wishlist synchronization changes.
-
-The resulting code was manually compiled and live-tested in SPT 4.1.3 before being marked as validated here.
-
-This disclosure is included intentionally so the development history is transparent to the original author, reviewers, and any mod-distribution platform considering the work.
+See [LICENSE](LICENSE).
 
 ## Credits
 
-- **Randek003** — current Bronzemanmode author/maintainer and source of the `Bronzemanmode_2.0.0` codebase used as the compatibility baseline.
-- Previous Bronzemanmode authors/contributors remain credited through the upstream project history.
-- **PainRUS** — SPT 4.1.3 compatibility testing, integration work, repository maintenance and live validation.
+- **KcY / KeiranY** — original creator of Bronzeman Mode.
+- **Randek003** — porting and maintenance of Bronzemanmode for later SPT versions before the SPT 4.1+ continuation.
+- **PainRUS** — SPT 4.1+ project direction, testing, integration, maintenance and validation.
+- **ChatGPT / LLM tooling** — substantial assistance with code analysis and implementation for this development branch.
