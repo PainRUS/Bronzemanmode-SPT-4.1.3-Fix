@@ -11,6 +11,11 @@ namespace Bronzeman.Client;
 /// websocket. Intercept only those sentinel notifications and render them through
 /// EFT's non-modal DisplayMessageNotification API instead of allowing the normal
 /// NotificationPopup path to create a disruptive popup.
+///
+/// EFT notification implementation types are obfuscated and their concrete names
+/// are not stable compile-time API. Resolve the notification argument type from
+/// NotificationManagerClass.OnNotificationReceived at runtime instead of naming
+/// NotificationAbstractClass directly.
 /// </summary>
 internal sealed class PurchaseBlockedNotificationPatch : ModulePatch
 {
@@ -22,21 +27,54 @@ internal sealed class PurchaseBlockedNotificationPatch : ModulePatch
 
     protected override MethodBase GetTargetMethod()
     {
-        return typeof(NotificationManagerClass)
-            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Single(method =>
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+        var notificationEvent = typeof(NotificationManagerClass).GetEvent(
+            "OnNotificationReceived",
+            flags)
+            ?? throw new MissingMemberException(
+                typeof(NotificationManagerClass).FullName,
+                "OnNotificationReceived");
+
+        var invokeMethod = notificationEvent.EventHandlerType?.GetMethod("Invoke")
+            ?? throw new MissingMethodException(
+                notificationEvent.EventHandlerType?.FullName,
+                "Invoke");
+
+        var invokeParameters = invokeMethod.GetParameters();
+        if (invokeParameters.Length != 1)
+        {
+            throw new InvalidOperationException(
+                "Bronzeman expected OnNotificationReceived to have exactly one notification argument.");
+        }
+
+        var notificationType = invokeParameters[0].ParameterType;
+
+        var candidates = typeof(NotificationManagerClass)
+            .GetMethods(flags)
+            .Where(method =>
             {
                 if (method.ReturnType != typeof(void))
                     return false;
 
                 var parameters = method.GetParameters();
                 return parameters.Length == 1
-                       && typeof(NotificationAbstractClass).IsAssignableFrom(parameters[0].ParameterType);
-            });
+                       && parameters[0].ParameterType == notificationType;
+            })
+            .ToArray();
+
+        if (candidates.Length != 1)
+        {
+            throw new InvalidOperationException(
+                $"Bronzeman could not uniquely resolve NotificationManagerClass notification-dispatch method. " +
+                $"Expected 1 candidate for {notificationType.FullName}, found {candidates.Length}.");
+        }
+
+        return candidates[0];
     }
 
     [PatchPrefix]
-    private static bool Prefix(NotificationAbstractClass __0)
+    private static bool Prefix(object __0)
     {
         if (__0 is null || !TryResolveSentinel(__0, out var russian))
             return true;
