@@ -1,11 +1,16 @@
+using System.Collections;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Collections;
 using SPTarkov.Common.Models.Logging;
-using SPTarkov.Server.Core.Helpers.Items;
-using SPTarkov.Server.Core.Servers;
-using SPTarkov.Server.Core.Models.Spt.Tables;
 using SPTarkov.DI.Annotations;
+using SPTarkov.Server.Core.Helpers.Items;
+using SPTarkov.Server.Core.Models.Common;
+using SPTarkov.Server.Core.Models.Eft.Common;
+using SPTarkov.Server.Core.Models.Eft.Common.Tables;
+using SPTarkov.Server.Core.Models.Eft.Profile;
+using SPTarkov.Server.Core.Models.Enums;
+using SPTarkov.Server.Core.Models.Spt.Tables;
+using SPTarkov.Server.Core.Servers;
 
 namespace Bronzeman;
 
@@ -41,18 +46,20 @@ public sealed class BronzemanMod(
             logger.Error(message);
     }
 
-    private void LogSuccess(string message)
+    public SptProfile GetPlayer(string sessionId)
     {
-        if (config.Debug)
-            logger.Success(message);
+        if (!MongoId.IsValidMongoId(sessionId))
+            throw new ArgumentException($"Invalid SPT session id: '{sessionId}'.", nameof(sessionId));
+
+        return saveServer.GetProfile(new MongoId(sessionId));
     }
 
-    public dynamic GetPlayer(string sessionId)
+    public SptProfile GetPlayer(MongoId sessionId)
     {
         return saveServer.GetProfile(sessionId);
     }
 
-    public void InitializePlayer(dynamic profile)
+    public void InitializePlayer(SptProfile profile)
     {
         if (GetWipeState(profile))
         {
@@ -63,7 +70,6 @@ public sealed class BronzemanMod(
         LogInfo("[bronzeman] InitializePlayer: wipe=false, processing profile.");
 
         var items = GetOrCreateBronzemanItems(profile);
-
         LogInfo($"[bronzeman] bronzemanItems currently has {items.Count} entries.");
 
         CheckInventory(profile);
@@ -71,75 +77,27 @@ public sealed class BronzemanMod(
         LogInfo($"[bronzeman] bronzemanItems after inventory scan: {items.Count} entries.");
     }
 
-    private static bool GetWipeState(dynamic profile)
+    private static bool GetWipeState(SptProfile profile)
     {
-        try
-        {
-            return Convert.ToBoolean(profile.ProfileInfo.IsWiped);
-        }
-        catch
-        {
-            // During very early profile creation, fail safe and skip processing.
-            return true;
-        }
+        return profile.ProfileInfo?.IsWiped ?? true;
     }
 
-
-    private static string GetUsername(dynamic profile)
+    private static string GetUsername(SptProfile profile)
     {
-        try
-        {
-            return profile.ProfileInfo.Username?.ToString() ?? "unknown";
-        }
-        catch
-        {
-            return "unknown";
-        }
+        return profile.ProfileInfo?.Username ?? "unknown";
     }
 
-    private static bool HasSpawnedInSession(dynamic item)
+    public List<string> GetOrCreateBronzemanItems(SptProfile profile)
     {
-        try
-        {
-            JsonElement json = JsonSerializer.SerializeToElement((object)item);
+        var extensionData = GetExtensionData(GetPmcProfile(profile));
 
-            // SPT C# models may serialize this as "Upd",
-            // while raid/profile JSON normally uses "upd".
-            if (!json.TryGetProperty("upd", out var upd) &&
-                !json.TryGetProperty("Upd", out upd))
-            {
-                return false;
-            }
-
-            if (!upd.TryGetProperty("SpawnedInSession", out var spawned))
-            {
-                return false;
-            }
-
-            return spawned.ValueKind == JsonValueKind.True;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    public List<string> GetOrCreateBronzemanItems(dynamic profile)
-    {
-        var extensionData = GetExtensionData(profile);
-
-        if (!extensionData.ContainsKey(BronzemanItemsKey))
+        if (!extensionData.TryGetValue(BronzemanItemsKey, out var value) || value is null)
         {
             var created = new List<string>();
-
-            SetExtensionValue(extensionData, BronzemanItemsKey, created);
-
+            extensionData[BronzemanItemsKey] = created;
             LogInfo("[bronzeman] Adding characters.pmc.bronzemanItems.");
-
             return created;
         }
-
-        var value = extensionData[BronzemanItemsKey];
 
         if (value is List<string> list)
             return list;
@@ -147,14 +105,14 @@ public sealed class BronzemanMod(
         if (value is JsonElement element)
         {
             var parsed = element.Deserialize<List<string>>() ?? [];
-            SetExtensionValue(extensionData, BronzemanItemsKey, parsed);
+            extensionData[BronzemanItemsKey] = parsed;
             return parsed;
         }
 
         if (value is JsonNode node)
         {
             var parsed = node.Deserialize<List<string>>() ?? [];
-            SetExtensionValue(extensionData, BronzemanItemsKey, parsed);
+            extensionData[BronzemanItemsKey] = parsed;
             return parsed;
         }
 
@@ -162,121 +120,71 @@ public sealed class BronzemanMod(
         {
             var parsed = enumerable.Cast<object>()
                 .Select(x => x?.ToString())
-                .Where(x => !string.IsNullOrEmpty(x))
+                .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Cast<string>()
                 .ToList();
 
-            SetExtensionValue(extensionData, BronzemanItemsKey, parsed);
+            extensionData[BronzemanItemsKey] = parsed;
             return parsed;
         }
 
         throw new InvalidOperationException(
-            $"Unexpected type for profile.ExtensionData['{BronzemanItemsKey}']: {value?.GetType().FullName}");
+            $"Unexpected type for profile ExtensionData['{BronzemanItemsKey}']: {value.GetType().FullName}");
     }
 
-    private static Dictionary<string, object> GetExtensionData(dynamic profile)
+    private static Dictionary<string, object> GetExtensionData(PmcData pmc)
     {
-        dynamic pmc = GetPmcProfile(profile);
-        object? value = pmc.ExtensionData;
+        // ExtensionData is injected into SPT model classes by the server's
+        // Ceciler.JsonExtensionData build patch. Reflection keeps this mod
+        // compatible with the public 4.1.2 NuGet reference while using the
+        // patched property present at runtime in SPT 4.1.3.
+        var property = pmc.GetType().GetProperty("ExtensionData")
+                       ?? throw new InvalidOperationException("SPT PMC ExtensionData property is unavailable.");
 
-        return value as Dictionary<string, object>
-            ?? throw new InvalidOperationException(
-                $"SPT PMC ExtensionData is unavailable or has an unexpected type: {value?.GetType().FullName}");
+        var value = property.GetValue(pmc);
+        if (value is Dictionary<string, object> dictionary)
+            return dictionary;
+
+        if (value is null)
+        {
+            dictionary = new Dictionary<string, object>();
+            property.SetValue(pmc, dictionary);
+            return dictionary;
+        }
+
+        throw new InvalidOperationException(
+            $"SPT PMC ExtensionData has an unexpected type: {value.GetType().FullName}");
     }
 
-    private static void SetExtensionValue(
-        Dictionary<string, object> extensionData,
-        string key,
-        List<string> value)
+    public List<string> ItemCheck(SptProfile profile)
     {
-        extensionData[key] = value;
+        return BuildAvailableSet(profile).ToList();
     }
 
-    public List<string> ItemCheck(dynamic profile)
+    private HashSet<string> BuildAvailableSet(SptProfile profile)
     {
-        // BronzemanMod can be resolved as separate DI instances.
-        // Build ignored categories on the exact instance performing this check.
         BuildCategories();
 
-        List<string> unlocked = GetOrCreateBronzemanItems(profile);
-
-        var available = new List<string>(unlocked.Count + categories.Count + config.IgnoreItems.Count);
-        available.AddRange(unlocked);
-        available.AddRange(categories);
-        available.AddRange(config.IgnoreItems);
-
-        return available
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var available = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        available.UnionWith(GetOrCreateBronzemanItems(profile));
+        available.UnionWith(categories);
+        available.UnionWith(config.IgnoreItems);
+        return available;
     }
 
-    private static string? GetTemplateParentId(object item)
+    public bool CanPurchase(SptProfile profile, string itemId)
     {
-        try
-        {
-            JsonElement json = JsonSerializer.SerializeToElement(item);
-
-            if (json.ValueKind == JsonValueKind.Object)
-            {
-                foreach (var property in json.EnumerateObject())
-                {
-                    if (!string.Equals(property.Name, "_parent", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(property.Name, "parent", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(property.Name, "parentId", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    if (property.Value.ValueKind == JsonValueKind.String)
-                        return property.Value.GetString();
-                }
-            }
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            var type = item.GetType();
-
-            foreach (var propertyName in new[] { "Parent", "_parent", "ParentId" })
-            {
-                var property = type.GetProperty(propertyName);
-                var value = property?.GetValue(item)?.ToString();
-
-                if (!string.IsNullOrWhiteSpace(value))
-                    return value;
-            }
-        }
-        catch
-        {
-        }
-
-        return null;
+        return CanPurchase(profile, itemId, BuildAvailableSet(profile), logDetails: config.Debug);
     }
 
-    private dynamic? GetTemplateById(string id)
+    private bool CanPurchase(
+        SptProfile profile,
+        string itemId,
+        HashSet<string> available,
+        bool logDetails)
     {
-        foreach (var entry in templateTable.Items)
-        {
-            if (string.Equals(
-                    entry.Key.ToString(),
-                    id,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return entry.Value;
-            }
-        }
-
-        return null;
-    }
-
-    public bool CanPurchase(dynamic profile, string itemId)
-    {
-        var available = new HashSet<string>(
-            ItemCheck(profile),
-            StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(itemId))
+            return false;
 
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var currentId = itemId;
@@ -285,24 +193,16 @@ public sealed class BronzemanMod(
         {
             if (available.Contains(currentId))
             {
-                if (config.Debug)
+                if (logDetails)
                 {
                     var unlockedItems = new HashSet<string>(
                         GetOrCreateBronzemanItems(profile),
                         StringComparer.OrdinalIgnoreCase);
 
-                    var ignoredCategories = new HashSet<string>(
-                        categories,
-                        StringComparer.OrdinalIgnoreCase);
-
-                    var ignoredItems = new HashSet<string>(
-                        config.IgnoreItems,
-                        StringComparer.OrdinalIgnoreCase);
-
                     var reason =
                         unlockedItems.Contains(currentId) ? "UNLOCKED" :
-                        ignoredCategories.Contains(currentId) ? "CATEGORY" :
-                        ignoredItems.Contains(currentId) ? "IGNORE" :
+                        categories.Contains(currentId, StringComparer.OrdinalIgnoreCase) ? "CATEGORY" :
+                        config.IgnoreItems.Contains(currentId, StringComparer.OrdinalIgnoreCase) ? "IGNORE" :
                         "ALLOWED";
 
                     LogInfo(
@@ -313,11 +213,9 @@ public sealed class BronzemanMod(
                 return true;
             }
 
-            dynamic? template = GetTemplateById(currentId);
-
-            if (template is null)
+            if (!TryGetTemplate(currentId, out var template) || template is null)
             {
-                if (config.Debug)
+                if (logDetails)
                 {
                     LogWarning(
                         $"[bronzeman] TemplateTable does not contain ({currentId}) while checking ({itemId}).");
@@ -326,12 +224,11 @@ public sealed class BronzemanMod(
                 break;
             }
 
-            string parentId = GetTemplateParentId((object)template) ?? string.Empty;
+            var parentId = template.Parent.ToString();
 
-            if (config.Debug)
+            if (logDetails)
             {
-                LogInfo(
-                    $"[bronzeman] Template parent walk ({itemId}): ({currentId}) -> ({parentId})");
+                LogInfo($"[bronzeman] Template parent walk ({itemId}): ({currentId}) -> ({parentId})");
             }
 
             if (string.IsNullOrEmpty(parentId))
@@ -340,7 +237,7 @@ public sealed class BronzemanMod(
             currentId = parentId;
         }
 
-        if (config.Debug)
+        if (logDetails)
         {
             LogInfo(
                 $"[bronzeman] Locked ({itemId}) {itemHelper.GetItemName(itemId)}; " +
@@ -350,61 +247,21 @@ public sealed class BronzemanMod(
         return false;
     }
 
-    private static string? GetItemTemplateId(dynamic item)
+    private bool TryGetTemplate(string itemId, out TemplateItem? template)
     {
-        if (item is null)
-            return null;
+        template = null;
 
-        try
-        {
-            JsonElement json = JsonSerializer.SerializeToElement((object)item);
+        if (!MongoId.IsValidMongoId(itemId))
+            return false;
 
-            if (json.ValueKind == JsonValueKind.Object)
-            {
-                foreach (var property in json.EnumerateObject())
-                {
-                    if (!string.Equals(property.Name, "_tpl", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(property.Name, "tpl", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(property.Name, "templateId", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    if (property.Value.ValueKind == JsonValueKind.String)
-                        return property.Value.GetString();
-                }
-            }
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            var type = ((object)item).GetType();
-
-            foreach (var propertyName in new[] { "_tpl", "Tpl", "TemplateId", "Template" })
-            {
-                var property = type.GetProperty(propertyName);
-                var value = property?.GetValue(item)?.ToString();
-
-                if (!string.IsNullOrWhiteSpace(value))
-                    return value;
-            }
-        }
-        catch
-        {
-        }
-
-        return null;
+        return templateTable.Items.TryGetValue(new MongoId(itemId), out template);
     }
 
-    public void UnlockItems(dynamic profile, IEnumerable<dynamic> items)
+    public void UnlockItems(SptProfile profile, IEnumerable<Item> items)
     {
         var bronzemanItems = GetOrCreateBronzemanItems(profile);
-        var wishlist = GetWishlist(profile);
+        var wishlist = GetWishlistDictionary(profile);
         var originalCount = bronzemanItems.Count;
-
         var materialized = items.ToList();
 
         if (config.Unlocks.FoundInRaidOnly)
@@ -413,21 +270,18 @@ public sealed class BronzemanMod(
 
             if (config.Debug)
             {
-                foreach (var item in materialized.Where(x =>
-                    x is not null &&
-                    !HasSpawnedInSession(x)))
+                foreach (var item in materialized.Where(item => item.Upd?.SpawnedInSession != true))
                 {
-                    var tpl = GetItemTemplateId(item);
-                    if (string.IsNullOrEmpty(tpl))
-                        continue;
-
-                    LogInfo(
-                        $"[bronzeman] Not Unlocking (not FIR): ({tpl}) {itemHelper.GetItemName(tpl)}");
+                    var tpl = item.Template.ToString();
+                    if (!string.IsNullOrEmpty(tpl))
+                    {
+                        LogInfo($"[bronzeman] Not Unlocking (not FIR): ({tpl}) {itemHelper.GetItemName(tpl)}");
+                    }
                 }
             }
 
             materialized = materialized
-                .Where(HasSpawnedInSession)
+                .Where(item => item.Upd?.SpawnedInSession == true)
                 .ToList();
 
             var ignored = originalItemCount - materialized.Count;
@@ -440,55 +294,63 @@ public sealed class BronzemanMod(
 
         foreach (var item in materialized)
         {
-            if (item is null)
-                continue;
-
-            var tpl = GetItemTemplateId(item);
-
+            var tpl = item.Template.ToString();
             if (string.IsNullOrEmpty(tpl))
             {
                 LogWarning("[bronzeman] Inventory item had no readable template id, skipping.");
                 continue;
             }
 
-            if (!bronzemanItems.Contains(tpl))
-            {
-                bronzemanItems.Add(tpl);
-
-                if (wishlist.ContainsKey(tpl))
-                {
-                    var wishlistValue = Convert.ToInt32(wishlist[tpl]);
-
-                    if (wishlistValue == config.WishlistType ||
-                        wishlistValue == config.GunsmithWishlistType)
-                    {
-                        wishlist.Remove(tpl);
-                    }
-                }
-            }
+            UnlockTemplate(bronzemanItems, wishlist, tpl);
 
             if (config.Debug)
-            {
-                LogInfo(
-                    $"[bronzeman] Unlocking: ({tpl}) {itemHelper.GetItemName(tpl)}");
-            }
+                LogInfo($"[bronzeman] Unlocking: ({tpl}) {itemHelper.GetItemName(tpl)}");
         }
 
         LogInfo(
             $"[bronzeman] Unlocked {bronzemanItems.Count - originalCount} items for {GetUsername(profile)}");
     }
 
-    public void UnlockItemTemplates(dynamic profile, IEnumerable<string> templates)
+    public void UnlockItemTemplates(SptProfile profile, IEnumerable<string> templates)
     {
-        var items = templates.Select(tpl => new UnlockItem { _tpl = tpl });
-        UnlockItems(profile, items);
+        var bronzemanItems = GetOrCreateBronzemanItems(profile);
+        var wishlist = GetWishlistDictionary(profile);
+        var originalCount = bronzemanItems.Count;
+
+        foreach (var tpl in templates.Where(tpl => !string.IsNullOrWhiteSpace(tpl)))
+        {
+            UnlockTemplate(bronzemanItems, wishlist, tpl);
+
+            if (config.Debug)
+                LogInfo($"[bronzeman] Unlocking template: ({tpl}) {itemHelper.GetItemName(tpl)}");
+        }
+
+        LogInfo(
+            $"[bronzeman] Unlocked {bronzemanItems.Count - originalCount} item templates for {GetUsername(profile)}");
     }
 
-    public void CheckInventory(dynamic profile)
+    private void UnlockTemplate(
+        List<string> bronzemanItems,
+        Dictionary<MongoId, int> wishlist,
+        string tpl)
+    {
+        if (!MongoId.IsValidMongoId(tpl))
+        {
+            LogWarning($"[bronzeman] Invalid template id '{tpl}', skipping unlock.");
+            return;
+        }
+
+        if (!bronzemanItems.Contains(tpl, StringComparer.OrdinalIgnoreCase))
+            bronzemanItems.Add(tpl);
+
+        RemoveManagedWishlistEntry(wishlist, new MongoId(tpl));
+    }
+
+    public void CheckInventory(SptProfile profile)
     {
         try
         {
-            var inventoryItems = ((dynamic)GetPmcProfile(profile)).Inventory.Items;
+            var inventoryItems = GetPmcProfile(profile).Inventory?.Items;
 
             if (inventoryItems is null)
             {
@@ -504,37 +366,34 @@ public sealed class BronzemanMod(
         }
     }
 
-    private static object GetPmcProfile(dynamic profile)
+    private static PmcData GetPmcProfile(SptProfile profile)
     {
-        object? pmc = profile.CharacterData?.PmcData;
-
-        return pmc
-            ?? throw new InvalidOperationException(
-                "SPT profile CharacterData.PmcData is null.");
+        return profile.CharacterData?.PmcData
+               ?? throw new InvalidOperationException("SPT profile CharacterData.PmcData is null.");
     }
 
-    public dynamic GetWishlist(dynamic profile)
+    public Dictionary<MongoId, int> GetWishlist(SptProfile profile)
     {
-        return ((dynamic)GetPmcProfile(profile)).WishList;
+        return GetWishlistDictionary(profile);
     }
 
-    public bool IsBlockedByWishlist(dynamic profile, string itemId)
+    private static Dictionary<MongoId, int> GetWishlistDictionary(SptProfile profile)
+    {
+        var pmc = GetPmcProfile(profile);
+        pmc.WishList ??= [];
+        return pmc.WishList;
+    }
+
+    public bool IsBlockedByWishlist(SptProfile profile, string itemId)
     {
         try
         {
+            if (!MongoId.IsValidMongoId(itemId))
+                return false;
+
             var wishlist = GetWishlistDictionary(profile);
-
-            if (!wishlist.Contains(itemId))
-                return false;
-
-            var raw = wishlist[itemId];
-            if (raw is null)
-                return false;
-
-            var value = Convert.ToInt32(raw);
-
-            return value == config.WishlistType ||
-                   value == config.GunsmithWishlistType;
+            return wishlist.TryGetValue(new MongoId(itemId), out var value)
+                   && IsManagedWishlistValue(value);
         }
         catch (Exception ex)
         {
@@ -543,14 +402,22 @@ public sealed class BronzemanMod(
         }
     }
 
+    private bool IsManagedWishlistValue(int value)
+    {
+        return value == config.WishlistType || value == config.GunsmithWishlistType;
+    }
+
+    private void RemoveManagedWishlistEntry(Dictionary<MongoId, int> wishlist, MongoId itemId)
+    {
+        if (wishlist.TryGetValue(itemId, out var value) && IsManagedWishlistValue(value))
+            wishlist.Remove(itemId);
+    }
+
     private bool IsInIgnoredCategory(string itemId)
     {
         BuildCategories();
 
-        var ignoredCategories = new HashSet<string>(
-            categories,
-            StringComparer.OrdinalIgnoreCase);
-
+        var ignoredCategories = new HashSet<string>(categories, StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var currentId = itemId;
 
@@ -559,54 +426,43 @@ public sealed class BronzemanMod(
             if (ignoredCategories.Contains(currentId))
                 return true;
 
-            dynamic? template = GetTemplateById(currentId);
-
-            if (template is null)
+            if (!TryGetTemplate(currentId, out var template) || template is null)
                 break;
 
-            currentId = GetTemplateParentId((object)template) ?? string.Empty;
+            currentId = template.Parent.ToString();
         }
 
         return false;
     }
 
-    private void RemoveIgnoredCategoryItemsFromWishlist(IDictionary wishlist)
+    private void RemoveIgnoredItemsFromManagedWishlist(Dictionary<MongoId, int> wishlist)
     {
-        BuildCategories();
+        var keysToRemove = wishlist
+            .Where(entry =>
+            {
+                if (!IsManagedWishlistValue(entry.Value))
+                    return false;
 
-        var keysToRemove = new List<object>();
-
-        foreach (DictionaryEntry entry in wishlist)
-        {
-            var itemId = entry.Key?.ToString();
-
-            if (string.IsNullOrEmpty(itemId))
-                continue;
-
-            if (IsInIgnoredCategory(itemId))
-                keysToRemove.Add(entry.Key);
-        }
+                var itemId = entry.Key.ToString();
+                return IsInIgnoredCategory(itemId)
+                       || config.IgnoreItems.Contains(itemId, StringComparer.OrdinalIgnoreCase);
+            })
+            .Select(entry => entry.Key)
+            .ToList();
 
         foreach (var key in keysToRemove)
         {
-            var itemId = key?.ToString() ?? string.Empty;
+            var itemId = key.ToString();
             wishlist.Remove(key);
-
-            if (config.Debug)
-            {
-                LogInfo(
-                    $"[bronzeman] Removed ignored-category item from wishlist: ({itemId}) {itemHelper.GetItemName(itemId)}");
-            }
+            LogInfo(
+                $"[bronzeman] Removed managed ignored item from wishlist: ({itemId}) {itemHelper.GetItemName(itemId)}");
         }
 
         if (keysToRemove.Count > 0)
-        {
-            LogInfo(
-                $"[bronzeman] Removed {keysToRemove.Count} ignored-category items from wishlist.");
-        }
+            LogInfo($"[bronzeman] Removed {keysToRemove.Count} ignored Bronzeman wishlist entries.");
     }
 
-    public void ApplyWishlistRules(dynamic profile, dynamic templateTable)
+    public void ApplyWishlistRules(SptProfile profile, TemplateTable _)
     {
         try
         {
@@ -615,100 +471,52 @@ public sealed class BronzemanMod(
                 LogInfo("[bronzeman] ApplyWishlistRules: wipe=true, skipping.");
                 return;
             }
+
             LogInfo("[bronzeman] ApplyWishlistRules: wipe=false, processing.");
+
             var unlockedBeforeWishlist = GetOrCreateBronzemanItems(profile);
             LogInfo($"[bronzeman] Building wishlist from {unlockedBeforeWishlist.Count} bronzemanItems.");
+
             var wishlist = GetWishlistDictionary(profile);
             LogInfo($"[bronzeman] Wishlist before processing: {wishlist.Count}");
 
-            // Remove stale entries that belong to ignoreCategories:true.
-            RemoveIgnoredCategoryItemsFromWishlist(wishlist);
-            var quests = gunsmith.Quests;
-            var pmcQuests = ((dynamic)GetPmcProfile(profile)).Quests;
+            RemoveIgnoredItemsFromManagedWishlist(wishlist);
+
+            var available = BuildAvailableSet(profile);
 
             foreach (var entry in templateTable.Items)
             {
                 var itemId = entry.Key.ToString();
-                var handbookItem = entry.Value;
-                var props = handbookItem.Properties;
+                var props = entry.Value.Properties;
 
-                var name = props.Name?.ToString();
-                var questItem = GetBoolProperty(props, "QuestItem");
-
-                if (string.IsNullOrEmpty(name) ||
-                    string.Equals(name, "Dog tag", StringComparison.Ordinal) ||
-                    questItem)
-                    continue;
-
-                // Items in ignoreCategories:true should never remain on the Bronzeman wishlist.
-                if (IsInIgnoredCategory(itemId))
+                if (props is null)
                 {
-                    if (wishlist.Contains(itemId))
-                    {
-                        wishlist.Remove(itemId);
-
-                        if (config.Debug)
-                        {
-                            LogInfo(
-                                $"[bronzeman] Removing ignored-category item from wishlist: ({itemId}) {itemHelper.GetItemName(itemId)}");
-                        }
-                    }
-
+                    RemoveManagedWishlistEntry(wishlist, entry.Key);
                     continue;
                 }
 
-                if (!CanPurchase(profile, itemId))
+                var name = props.Name;
+                if (string.IsNullOrEmpty(name)
+                    || string.Equals(name, "Dog tag", StringComparison.Ordinal)
+                    || props.QuestItem == true)
                 {
-                    wishlist[itemId] = config.WishlistType;
+                    RemoveManagedWishlistEntry(wishlist, entry.Key);
+                    continue;
                 }
 
-                LogInfo($"[bronzeman] Wishlist after processing: {wishlist.Count}");
-            }
-
-            if (!QuestListContainsId(pmcQuests, quests[1].Id))
-            {
-                for (var z = 1; z < config.GunsmithCount && z < quests.Count; z++)
+                if (CanPurchase(profile, itemId, available, logDetails: false))
                 {
-                    foreach (var item in quests[z].Items)
-                    {
-                        if (!CanPurchase(profile, item))
-                            wishlist[item] = config.GunsmithWishlistType;
-                    }
+                    RemoveManagedWishlistEntry(wishlist, entry.Key);
+                    continue;
                 }
 
-                // Gunsmith entries may have re-added ignored-category items.
-                RemoveIgnoredCategoryItemsFromWishlist(wishlist);
-                return;
+                wishlist[entry.Key] = config.WishlistType;
             }
 
-            for (var i = 0; i < quests.Count; i++)
-            {
-                foreach (dynamic pmcQuest in pmcQuests)
-                {
-                    if (!string.Equals(
-                            GetStringProperty(pmcQuest, "Qid"),
-                            quests[i].Id,
-                            StringComparison.OrdinalIgnoreCase))
-                        continue;
+            ApplyGunsmithWishlist(profile, wishlist, available);
+            RemoveIgnoredItemsFromManagedWishlist(wishlist);
 
-                    if (GetIntProperty(pmcQuest, "Status") != 4)
-                    {
-                        for (var k = i; k < config.GunsmithCount && k < quests.Count; k++)
-                        {
-                            foreach (var item in quests[k].Items)
-                            {
-                                if (!CanPurchase(profile, item))
-                                    wishlist[item] = config.GunsmithWishlistType;
-                            }
-                        }
-                    }
-
-                    break;
-                }
-            }
-
-            // Final cleanup so ignoreCategories:true items never remain wishlisted.
-            RemoveIgnoredCategoryItemsFromWishlist(wishlist);
+            LogInfo($"[bronzeman] Wishlist after processing: {wishlist.Count}");
         }
         catch (Exception ex)
         {
@@ -716,62 +524,70 @@ public sealed class BronzemanMod(
         }
     }
 
-    private static IDictionary GetWishlistDictionary(dynamic profile)
+    private void ApplyGunsmithWishlist(
+        SptProfile profile,
+        Dictionary<MongoId, int> wishlist,
+        HashSet<string> available)
     {
-        object? wishlist = ((dynamic)GetPmcProfile(profile)).WishList;
-        return wishlist as IDictionary
-            ?? throw new InvalidOperationException("PMC WishList is not a dictionary.");
+        if (config.GunsmithCount <= 0 || gunsmith.Quests.Count == 0)
+            return;
+
+        var pmcQuests = GetPmcProfile(profile).Quests ?? [];
+        var completedQuestIds = pmcQuests
+            .Where(quest => quest.Status == QuestStatusEnum.Success)
+            .Select(quest => quest.QId.ToString())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var questCount = Math.Min(config.GunsmithCount, gunsmith.Quests.Count);
+
+        for (var index = 0; index < questCount; index++)
+        {
+            var quest = gunsmith.Quests[index];
+            var questId = ResolveGunsmithQuestId(quest);
+
+            if (!string.IsNullOrEmpty(questId) && completedQuestIds.Contains(questId))
+                continue;
+
+            foreach (var itemId in quest.Items)
+            {
+                if (!MongoId.IsValidMongoId(itemId))
+                {
+                    LogWarning($"[bronzeman] Invalid Gunsmith item template id '{itemId}', skipping.");
+                    continue;
+                }
+
+                if (CanPurchase(profile, itemId, available, logDetails: false))
+                    continue;
+
+                if (IsInIgnoredCategory(itemId)
+                    || config.IgnoreItems.Contains(itemId, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                wishlist[new MongoId(itemId)] = config.GunsmithWishlistType;
+            }
+        }
     }
 
-    private static bool QuestListContainsId(dynamic quests, string id)
+    private string ResolveGunsmithQuestId(GunsmithQuest quest)
     {
-        foreach (dynamic quest in quests)
+        var mapped = gunsmith.Gunsmith.FirstOrDefault(entry =>
+            string.Equals(entry.Value, quest.Name, StringComparison.OrdinalIgnoreCase));
+
+        if (!string.IsNullOrEmpty(mapped.Key))
         {
-            if (string.Equals(GetStringProperty(quest, "Qid"), id, StringComparison.OrdinalIgnoreCase))
-                return true;
+            if (!string.Equals(mapped.Key, quest.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                LogWarning(
+                    $"[bronzeman] Gunsmith data id mismatch for '{quest.Name}': " +
+                    $"quests[] has '{quest.Id}', map has '{mapped.Key}'. Using mapped id.");
+            }
+
+            return mapped.Key;
         }
 
-        return false;
-    }
-
-    private static string? GetStringProperty(dynamic value, string propertyName)
-    {
-        try
-        {
-            return value.GetType().GetProperty(propertyName)?.GetValue(value)?.ToString();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static int GetIntProperty(dynamic value, string propertyName)
-    {
-        try
-        {
-            var property = value.GetType().GetProperty(propertyName);
-            var raw = property?.GetValue(value);
-            return raw is null ? 0 : Convert.ToInt32(raw);
-        }
-        catch
-        {
-            return 0;
-        }
-    }
-
-    private static bool GetBoolProperty(dynamic value, string propertyName)
-    {
-        try
-        {
-            var property = value.GetType().GetProperty(propertyName);
-            var raw = property?.GetValue(value);
-            return raw is not null && Convert.ToBoolean(raw);
-        }
-        catch
-        {
-            return false;
-        }
+        return quest.Id;
     }
 
     public void BuildCategories()
@@ -801,6 +617,7 @@ public sealed class BronzemanMod(
         Add("5b3f15d486f77432d0509248", config.IgnoreCategories.ArmBands);
         Add("5485a8684bdc2da71d8b4567", config.IgnoreCategories.Ammo);
         Add("543be5cb4bdc2deb348b4568", config.IgnoreCategories.AmmoBoxes);
+
         if (config.IgnoreCategories.Containers)
         {
             Add("5795f317245977243854e041", true);
@@ -810,12 +627,7 @@ public sealed class BronzemanMod(
 
     private void Add(string id, bool enabled)
     {
-        if (enabled && !categories.Contains(id))
+        if (enabled && !categories.Contains(id, StringComparer.OrdinalIgnoreCase))
             categories.Add(id);
-    }
-
-    private sealed class UnlockItem
-    {
-        public string _tpl { get; init; } = string.Empty;
     }
 }
