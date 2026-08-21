@@ -59,11 +59,16 @@ Current compatibility work includes:
 - persistent Bronzeman unlock state in the player profile;
 - mail attachment unlock support;
 - assembled weapons received through mail can unlock the weapon and attached components;
-- immediate client-side wishlist synchronization through an optional BepInEx companion plugin.
+- immediate client-side wishlist synchronization through the BepInEx companion plugin;
+- linked-search compatibility for the native flea routes and UI Fixes slot searches;
+- locked templates are removed from the flea category tree instead of appearing as empty categories;
+- a second-layer purchase guard blocks locked direct-trader, Fence and flea purchases before SPT mutates inventory, money or offer stock;
+- blocked purchases use a non-modal localized notification instead of the EFT critical-error dialog;
+- `debugShowLockedItems` can expose locked trader/flea entries for purchase-guard testing without disabling the guard itself.
 
 ## Version
 
-Current development build: **2.0.3**  
+Current release: **2.0.1**  
 Target: **SPT 4.1.3**
 
 ## Validation
@@ -82,7 +87,12 @@ Validated scenarios include:
 - immediate mail attachment unlocks;
 - assembled weapon mail rewards;
 - flea/trader availability after mail unlocks;
-- client wishlist synchronization after closing the mail transfer screen.
+- client wishlist synchronization after closing the mail transfer screen;
+- UI Fixes linked-search filtering;
+- locked flea categories disappearing from the left-side flea tree;
+- blocked purchases at configured traders, Fence, normal flea offers, trader-owned flea offers and linked-search results;
+- blocked purchases do not add items, spend money, reduce trader/Fence stock or consume the target flea offer;
+- blocked purchases show the Bronzeman non-modal notification without the EFT critical-error dialog.
 
 Not every configuration or third-party mod combination has been tested.
 
@@ -114,7 +124,7 @@ Expected output:
 Bronzeman.Client\bin\Release\netstandard2.1\Bronzeman.Client.dll
 ```
 
-## Installation for testing
+## Installation
 
 ### Server
 

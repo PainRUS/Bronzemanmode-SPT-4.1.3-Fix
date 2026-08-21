@@ -6,7 +6,7 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>Bronzeman.Client</RootNamespace>
     <AssemblyName>Bronzeman.Client</AssemblyName>
-    <Version>2.0.3</Version>
+    <Version>2.0.1</Version>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
 
