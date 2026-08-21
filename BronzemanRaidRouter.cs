@@ -1,22 +1,25 @@
-using System.Text.Json;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
 using SPTarkov.Server.Core.Models.Common;
-using SPTarkov.Server.Core.Models.Utils;
-using SPTarkov.Server.Core.Models.Eft.Common;
+using SPTarkov.Server.Core.Models.Eft.Match;
+using SPTarkov.Server.Core.Models.Enums;
+using SPTarkov.Server.Core.Servers;
 using SPTarkov.Server.Core.Utils;
 
 namespace Bronzeman;
 
-[Injectable(TypePriority = OnLoadOrder.Routers - 1)]
+// Run after the native MatchStaticRouter. SPT applies the post-raid profile and
+// saves it in its own /client/match/local/end handler; Bronzeman must mutate
+// that final in-memory profile, not a pre-merge copy.
+[Injectable(TypePriority = OnLoadOrder.Routers + 1)]
 public sealed class BronzemanRaidRouter(
     JsonUtil jsonUtil,
     BronzemanRaidRouterCallback callback)
     : StaticRouter(jsonUtil, [
-        new RouteAction<RaidSaveRequest>(
-            "/raid/profile/save",
+        new RouteAction<EndLocalRaidRequestData>(
+            "/client/match/local/end",
             async (url, info, sessionId, output, cancellationToken) =>
-                await callback.Handle(info, sessionId.ToString(), output ?? string.Empty))
+                await callback.Handle(info, sessionId, output ?? string.Empty, cancellationToken))
     ])
 {
 }
@@ -24,66 +27,46 @@ public sealed class BronzemanRaidRouter(
 [Injectable]
 public sealed class BronzemanRaidRouterCallback(
     BronzemanMod bronzemanMod,
-    BronzemanConfig config)
+    BronzemanConfig config,
+    SaveServer saveServer)
 {
-    public ValueTask<string> Handle(
-        RaidSaveRequest info,
-        string sessionId,
-        string output)
+    public async ValueTask<string> Handle(
+        EndLocalRaidRequestData info,
+        MongoId sessionId,
+        string output,
+        CancellationToken cancellationToken)
     {
-        var unlock = info.Exit.Equals("runner", StringComparison.OrdinalIgnoreCase)
-            ? config.Unlocks.RaidRunThrough
-            : info.Exit.Equals("survived", StringComparison.OrdinalIgnoreCase)
-                ? true
-                : config.Unlocks.RaidDeath;
+        var result = info.Results;
+        var raidProfile = result?.Profile;
+        var inventoryItems = raidProfile?.Inventory?.Items;
 
-        if (!unlock)
-            return new ValueTask<string>(output);
+        if (result?.Result is null || inventoryItems is null)
+            return output;
+
+        if (!ShouldUnlock(result.Result.Value))
+            return output;
 
         var profile = bronzemanMod.GetPlayer(sessionId);
-        var items = ExtractInventoryItems(info.Profile);
-        bronzemanMod.UnlockItems(profile, items);
+        bronzemanMod.UnlockItems(profile, inventoryItems);
 
-        return new ValueTask<string>(output);
+        // Native SPT already saved the profile before this post-route runs.
+        // Persist Bronzeman's extension-data and wishlist mutations explicitly.
+        await saveServer.SaveProfileAsync(sessionId, cancellationToken);
+
+        return output;
     }
 
-    private static IEnumerable<dynamic> ExtractInventoryItems(JsonElement profile)
+    private bool ShouldUnlock(ExitStatus status)
     {
-        if (profile.ValueKind != JsonValueKind.Object ||
-            !profile.TryGetProperty("Inventory", out var inventory) ||
-            inventory.ValueKind != JsonValueKind.Object ||
-            !inventory.TryGetProperty("items", out var items) ||
-            items.ValueKind != JsonValueKind.Array)
+        return status switch
         {
-            return [];
-        }
-
-        return items.EnumerateArray().Select(x => new JsonRaidItem(x));
+            ExitStatus.SURVIVED => true,
+            ExitStatus.TRANSIT => true,
+            ExitStatus.RUNNER => config.Unlocks.RaidRunThrough,
+            ExitStatus.KILLED => config.Unlocks.RaidDeath,
+            ExitStatus.LEFT => config.Unlocks.RaidDeath,
+            ExitStatus.MISSINGINACTION => config.Unlocks.RaidDeath,
+            _ => false,
+        };
     }
-
-    private sealed class JsonRaidItem(JsonElement value)
-    {
-        public string _tpl =>
-            value.TryGetProperty("_tpl", out var tpl)
-                ? tpl.GetString() ?? string.Empty
-                : string.Empty;
-
-        public JsonRaidUpdate? upd =>
-            value.TryGetProperty("upd", out var upd)
-                ? new JsonRaidUpdate(upd)
-                : null;
-    }
-
-    private sealed class JsonRaidUpdate(JsonElement value)
-    {
-        public bool SpawnedInSession =>
-            value.TryGetProperty("SpawnedInSession", out var spawned) &&
-            spawned.ValueKind == JsonValueKind.True;
-    }
-}
-
-public sealed record RaidSaveRequest : IRequestData
-{
-    public string Exit { get; init; } = string.Empty;
-    public JsonElement Profile { get; init; }
 }
