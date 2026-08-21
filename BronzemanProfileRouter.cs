@@ -8,6 +8,8 @@ using SPTarkov.Server.Core.Utils;
 
 namespace Bronzeman;
 
+// Run before the native profile-list route so the serialized profile returned
+// to the client already contains the Bronzeman wishlist.
 [Injectable(TypePriority = OnLoadOrder.Routers - 1)]
 public sealed class BronzemanProfileRouter(
     JsonUtil jsonUtil,
@@ -16,10 +18,7 @@ public sealed class BronzemanProfileRouter(
         new RouteAction<EmptyRequestData>(
             "/client/game/profile/list",
             async (url, info, sessionId, output, cancellationToken) =>
-                await callback.Handle(
-                    sessionId,
-                    output ?? string.Empty)
-        )
+                await callback.Handle(sessionId, output ?? string.Empty, cancellationToken))
     ])
 {
 }
@@ -33,21 +32,21 @@ public sealed class BronzemanProfileRouterCallback(
 {
     public async ValueTask<string> Handle(
         MongoId sessionId,
-        string output)
+        string output,
+        CancellationToken cancellationToken)
     {
-        if (!config.Unlocks.Inventory)
-        {
-            return output;
-        }
+        var profile = bronzemanMod.GetPlayer(sessionId);
 
-        var profile = bronzemanMod.GetPlayer(sessionId.ToString());
+        // Inventory unlock is optional. Wishlist construction is not: locked
+        // items still need to be marked when inventory scanning is disabled.
+        if (config.Unlocks.Inventory)
+            bronzemanMod.InitializePlayer(profile);
 
-        bronzemanMod.InitializePlayer(profile);
         bronzemanMod.ApplyWishlistRules(profile, templateTable);
 
         // SPT 4.1 keeps profiles in memory; explicitly persist the mutations
         // so bronzemanItems and WishList are written to user/profiles/<id>.json.
-        await saveServer.SaveProfileAsync(sessionId);
+        await saveServer.SaveProfileAsync(sessionId, cancellationToken);
 
         return output;
     }
