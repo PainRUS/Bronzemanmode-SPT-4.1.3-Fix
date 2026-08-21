@@ -8,7 +8,7 @@ public sealed class Plugin : BaseUnityPlugin
 {
     public const string ModGuid = "com.randek.bronzeman.client";
     public const string PluginName = "Bronzeman Client";
-    public const string Version = "2.0.2";
+    public const string Version = "2.0.3";
 
     internal static ManualLogSource Log { get; private set; } = null!;
 
