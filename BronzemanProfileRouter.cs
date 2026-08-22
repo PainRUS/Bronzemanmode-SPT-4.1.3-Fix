@@ -9,8 +9,9 @@ using SPTarkov.Server.Core.Utils;
 namespace Bronzeman;
 
 // Run before the native profile-list route so the serialized profile returned
-// to the client already contains the Bronzeman wishlist.
-[Injectable(TypePriority = OnLoadOrder.Routers - 1)]
+// to the client already contains the Bronzeman wishlist. Priority -2 leaves a
+// deterministic pre-native slot at -1 for companion mods such as DeleteWishlist.
+[Injectable(TypePriority = OnLoadOrder.Routers - 2)]
 public sealed class BronzemanProfileRouter(
     JsonUtil jsonUtil,
     BronzemanProfileRouterCallback callback)
